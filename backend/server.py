@@ -13,6 +13,7 @@ import jwt
 import json
 import shutil
 import zipfile
+import csv
 
 DATABASE_URL = "sqlite:///./qa_portal.db"
 engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False})
@@ -452,6 +453,49 @@ def get_course_uploads(course_id: str, db: Session = Depends(get_db), current_us
             upload_date=upload.upload_date
         ))
     return result
+
+@api_router.post("/courses/{course_id}/upload-clo")
+def upload_clo_file(
+    course_id: str,
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    current_user: UserDB = Depends(get_current_user)
+):
+    course = db.query(CourseDB).filter(CourseDB.id == course_id).first()
+    if not course:
+        raise HTTPException(status_code=404, detail="Course not found")
+    upload_dir = f"uploads/{course_id}/clos"
+    os.makedirs(upload_dir, exist_ok=True)
+    file_path = os.path.join(upload_dir, file.filename)
+    with open(file_path, "wb") as buffer:
+        shutil.copyfileobj(file.file, buffer)
+
+    # Parse CLOs from CSV or TXT
+    clos = []
+    if file.filename.endswith('.csv'):
+        with open(file_path, newline='', encoding='utf-8') as csvfile:
+            reader = csv.reader(csvfile)
+            for row in reader:
+                if row:  # Each row is a CLO (first column)
+                    clos.append(row[0])
+    elif file.filename.endswith('.txt'):
+        with open(file_path, encoding='utf-8') as txtfile:
+            for line in txtfile:
+                line = line.strip()
+                if line:
+                    clos.append(line)
+    # You can add .docx/.pdf parsing if needed (requires extra libraries)
+
+    # Update course.clos if any CLOs found
+    if clos:
+        course.clos = json.dumps(clos)
+        db.commit()
+
+    return {
+        "message": "CLO file uploaded and parsed successfully",
+        "filename": file.filename,
+        "clos": clos
+    }
 
 # Feedback Routes
 @api_router.post("/courses/{course_id}/feedback")

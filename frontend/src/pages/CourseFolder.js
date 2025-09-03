@@ -121,6 +121,24 @@ function CourseFolder() {
                 </label>
               </div>
             )}
+
+            <input
+              type="file"
+              id="clo-upload"
+              accept=".pdf,.docx,.csv,.txt"
+              onChange={async (e) => {
+                const file = e.target.files[0];
+                if (!file || !selectedCourse) return;
+                const formData = new FormData();
+                formData.append('file', file);
+                await api.post(`/courses/${selectedCourse}/upload-clo`, formData);
+                alert('CLO file uploaded!');
+              }}
+              disabled={uploadLoading}
+            />
+            <label htmlFor="clo-upload" style={{ cursor: uploadLoading ? 'not-allowed' : 'pointer' }}>
+              Upload CLO File
+            </label>
           </div>
         </div>
 
