@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
 import { CloudArrowUpIcon, DocumentIcon, CheckCircleIcon, XCircleIcon, ClockIcon } from '@heroicons/react/24/outline';
+import '../App.css';
 
 const CourseFolder = ({ user }) => {
   const [courses, setCourses] = useState([]);

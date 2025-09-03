@@ -1,5 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { ChatBubbleLeftRightIcon, FaceSmileIcon, FaceFrownIcon, MinusIcon } from '@heroicons/react/24/outline';
+import '../App.css';
+
 
 const StudentFeedback = ({ user }) => {
   const [courses, setCourses] = useState([]);

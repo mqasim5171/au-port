@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { LightBulbIcon, ChartBarIcon, ExclamationCircleIcon } from '@heroicons/react/24/outline';
+import '../App.css';
 
 const Suggestions = ({ user }) => {
   const [courses, setCourses] = useState([]);

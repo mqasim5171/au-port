@@ -10,6 +10,8 @@ import {
   ArrowRightOnRectangleIcon
 } from '@heroicons/react/24/outline';
 
+import '../App.css';
+
 const Layout = ({ user, onLogout }) => {
   const location = useLocation();
 

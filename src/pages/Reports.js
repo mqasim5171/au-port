@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { DocumentTextIcon, ArrowDownTrayIcon, CalendarDaysIcon } from '@heroicons/react/24/outline';
+import '../App.css';
 
 const Reports = () => {
   const [courses, setCourses] = useState([]);

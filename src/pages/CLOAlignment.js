@@ -1,5 +1,7 @@
 // src/components/CLOAlignment.js
 import React, { useState } from "react";
+import '../App.css';
+
 
 const CLOAlignment = () => {
   const [selectedCourse, setSelectedCourse] = useState("");
