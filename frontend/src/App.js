@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { BrowserRouter as Router, Routes, Route, Navigate } from "react-router-dom";
 import Login from "./pages/Login";
 import Layout from "./pages/Layout";
@@ -8,22 +8,35 @@ import CLOAlignment from "./pages/CLOAlignment";
 import StudentFeedback from "./pages/StudentFeedback";
 import Suggestions from "./pages/Suggestions";
 import Reports from "./pages/Reports";
+import api from './api';
 
 function App() {
   const [user, setUser] = useState(null);
 
-  const handleLogin = (username, password) => {
-    // for frontend demo → set a dummy user
-    setUser({
-      username,
-      full_name: "Ayesha Munir",
-      role: "Faculty",
-      department: "IT",
-    });
+  useEffect(() => {
+    const token = localStorage.getItem('token');
+    if (token) {
+      api.defaults.headers.common['Authorization'] = `Bearer ${token}`;
+      // Optionally fetch user profile
+      api.get('/profile').then(res => setUser(res.data)).catch(() => handleLogout());
+    }
+  }, []);
+
+  const handleLogin = async (username, password) => {
+    try {
+      const res = await api.post('/login', { username, password });
+      setUser(res.data.user);
+      localStorage.setItem('token', res.data.access_token);
+      api.defaults.headers.common['Authorization'] = `Bearer ${res.data.access_token}`;
+    } catch (err) {
+      alert('Login failed');
+    }
   };
 
   const handleLogout = () => {
     setUser(null);
+    localStorage.removeItem('token');
+    delete api.defaults.headers.common['Authorization'];
   };
 
   return (

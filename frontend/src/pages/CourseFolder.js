@@ -1,47 +1,27 @@
-import React, { useState, useEffect } from 'react';
-import axios from 'axios';
+import React, { useEffect, useState } from "react";
+import api from "../api";
 import { CloudArrowUpIcon, DocumentIcon, CheckCircleIcon, XCircleIcon, ClockIcon } from '@heroicons/react/24/outline';
 import '../App.css';
 
-const CourseFolder = ({ user }) => {
+function CourseFolder() {
   const [courses, setCourses] = useState([]);
-  const [selectedCourse, setSelectedCourse] = useState('');
+  const [selectedCourse, setSelectedCourse] = useState("");
   const [uploads, setUploads] = useState([]);
   const [loading, setLoading] = useState(false);
   const [uploadLoading, setUploadLoading] = useState(false);
 
   useEffect(() => {
-    fetchCourses();
+    api.get("/courses").then(res => setCourses(res.data));
   }, []);
 
   useEffect(() => {
     if (selectedCourse) {
-      fetchUploads();
+      setLoading(true);
+      api.get(`/courses/${selectedCourse}/uploads`)
+        .then(res => setUploads(res.data))
+        .finally(() => setLoading(false));
     }
   }, [selectedCourse]);
-
-  const fetchCourses = async () => {
-    try {
-      const response = await axios.get('/courses');
-      setCourses(response.data);
-    } catch (error) {
-      console.error('Error fetching courses:', error);
-    }
-  };
-
-  const fetchUploads = async () => {
-    if (!selectedCourse) return;
-    
-    setLoading(true);
-    try {
-      const response = await axios.get(`/courses/${selectedCourse}/uploads`);
-      setUploads(response.data);
-    } catch (error) {
-      console.error('Error fetching uploads:', error);
-    } finally {
-      setLoading(false);
-    }
-  };
 
   const handleFileUpload = async (event) => {
     const file = event.target.files[0];
@@ -54,17 +34,11 @@ const CourseFolder = ({ user }) => {
     formData.append('file_type', 'course_folder');
 
     try {
-      const response = await axios.post(`/courses/${selectedCourse}/upload`, formData, {
-        headers: {
-          'Content-Type': 'multipart/form-data',
-        },
-      });
-
+      await api.post(`/courses/${selectedCourse}/upload`, formData);
       alert('File uploaded successfully!');
-      fetchUploads(); // Refresh uploads list
+      api.get(`/courses/${selectedCourse}/uploads`).then(res => setUploads(res.data));
     } catch (error) {
-      console.error('Error uploading file:', error);
-      alert('Error uploading file. Please try again.');
+      alert('Error uploading file.');
     } finally {
       setUploadLoading(false);
     }
@@ -241,6 +215,6 @@ const CourseFolder = ({ user }) => {
       </div>
     </div>
   );
-};
+}
 
 export default CourseFolder;

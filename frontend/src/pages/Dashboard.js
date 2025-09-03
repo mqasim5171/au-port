@@ -1,27 +1,16 @@
-import React, { useState, useEffect } from 'react';
+import React, { useEffect, useState } from "react";
+import api from "../api";
 import '../App.css';
 
 const Dashboard = ({ user }) => {
-  const [stats, setStats] = useState({
-    total_courses: 5,
-    total_uploads: 12,
-    total_feedback: 8,
-    recent_uploads: [
-      { filename: "CourseOutline.pdf", upload_date: new Date(), validation_status: "approved" },
-      { filename: "Syllabus.docx", upload_date: new Date(), validation_status: "pending" },
-    ],
-    recent_feedback: [
-      { feedback_text: "The course material was very helpful", student_name: "Ali", sentiment: "positive" },
-      { feedback_text: "The lectures were sometimes too fast", student_name: "Sara", sentiment: "neutral" },
-    ]
-  });
+  const [stats, setStats] = useState(null);
   const [loading, setLoading] = useState(true);
 
-  // Simulate loading
   useEffect(() => {
-    setTimeout(() => {
-      setLoading(false);
-    }, 1000);
+    api.get("/dashboard/stats")
+      .then(res => setStats(res.data))
+      .catch(() => setStats(null))
+      .finally(() => setLoading(false));
   }, []);
 
   if (loading) {
@@ -35,6 +24,20 @@ const Dashboard = ({ user }) => {
         <div className="text-center" style={{ padding: '64px' }}>
           <div className="spinner" style={{ margin: '0 auto' }}></div>
           <p style={{ marginTop: '16px', color: '#64748b' }}>Loading dashboard...</p>
+        </div>
+      </div>
+    );
+  } 
+
+  if (!stats) {
+    return (
+      <div className="fade-in">
+        <div className="page-header">
+          <h1 className="page-title">Welcome back, {user?.full_name || user?.username || "User"}!</h1>
+          <p className="page-subtitle">Overview of your academic quality assurance activities</p>
+        </div>
+        <div style={{ padding: '24px', textAlign: 'center', color: '#e53e3e' }}>
+          Error loading dashboard.
         </div>
       </div>
     );
