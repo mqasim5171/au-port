@@ -1,6 +1,7 @@
 from fastapi import FastAPI, APIRouter, HTTPException, Depends, File, UploadFile, Form
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse, JSONResponse
 from pydantic import BaseModel, Field
 from typing import List, Optional, Dict, Any
 from datetime import datetime, timezone
@@ -14,6 +15,15 @@ import json
 import shutil
 import zipfile
 import csv
+import io
+import re
+
+# ---------- NEW: lightweight NLP / PDF / DOCX utils ----------
+# These imports are safe even if unused by other endpoints
+import pandas as pd
+from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.metrics.pairwise import cosine_similarity
+# pymupdf (fitz) and python-docx are imported inside functions to avoid startup cost
 
 DATABASE_URL = "sqlite:///./qa_portal.db"
 engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False})
@@ -25,6 +35,11 @@ api_router = APIRouter(prefix="/api")
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 security = HTTPBearer()
 JWT_SECRET = os.environ.get('JWT_SECRET', 'your-secret-key-change-in-production')
+
+# ---------- NEW: paths for feedback CSVs (frontend/public/feedback) ----------
+PROJECT_ROOT = os.path.abspath(os.path.dirname(__file__))
+FRONTEND_PUBLIC_DIR = os.path.abspath(os.path.join(PROJECT_ROOT, "..", "frontend", "public"))
+FEEDBACK_DIR = os.path.join(FRONTEND_PUBLIC_DIR, "feedback")
 
 # SQLAlchemy Models
 class UserDB(Base):
@@ -263,7 +278,114 @@ def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(securit
     except jwt.PyJWTError:
         raise HTTPException(status_code=401, detail="Invalid authentication credentials")
 
+# ---------- NEW: parsing & alignment helpers (PDF/DOCX → normalized JSON) ----------
+def _normalize_ws(s: str) -> str:
+    return re.sub(r"\s+", " ", s).strip()
+
+def _heuristic_parse(text: str) -> Dict[str, Any]:
+    t = _normalize_ws(text)
+    course_code = re.search(r"(CS|SE|EE|IT)[- ]?\d{3}", t)
+    title_match = re.search(r"Course\s*Title[:\-]\s*([^\n]+)", t, re.I)
+    clos = re.findall(r"CLO\d+[:\-]\s*([^\n]+)", t, re.I)
+    if not clos:
+        clos = [m.strip("- ") for m in re.findall(r"\b(CLO\s*\d+[^\n]*)", t, re.I)]
+
+    assessments = []
+    for name in ["Quiz", "Assignment", "Midterm", "Project", "Final"]:
+        if re.search(name, t, re.I):
+            assessments.append({"name": name, "clos": []})
+
+    grading = []
+    for m in re.findall(r"(Quiz|Assignment|Midterm|Project|Final)\s*(\d{1,2})%", t, re.I):
+        grading.append({"component": m[0].title(), "weight": int(m[1])})
+
+    policies = {
+        "attendance": bool(re.search(r"attendance", t, re.I)),
+        "lateSubmission": bool(re.search(r"late\s*submission", t, re.I)),
+        "examPolicy": bool(re.search(r"exam\s*policy|make[- ]up", t, re.I)),
+    }
+    weekly_plan_present = bool(re.search(r"weekly\s*(plan|schedule|outline)", t, re.I))
+
+    return {
+        "course": {
+            "code": course_code.group(0).upper() if course_code else "CS-XXX",
+            "title": title_match.group(1).strip() if title_match else "Untitled Course",
+        },
+        "clos": [_normalize_ws(c) for c in clos[:10]],
+        "assessments": assessments if assessments else [{"name": "Assessment 1", "clos": []}],
+        "policies": policies,
+        "grading": grading,
+        "weekly_plan_present": weekly_plan_present,
+    }
+
+def parse_docx_bytes(file_bytes: bytes) -> Dict[str, Any]:
+    from docx import Document
+    from io import BytesIO
+    doc = Document(BytesIO(file_bytes))
+    text = "\n".join([p.text for p in doc.paragraphs])
+    return _heuristic_parse(text)
+
+def parse_pdf_bytes(file_bytes: bytes) -> Dict[str, Any]:
+    import fitz  # PyMuPDF
+    from io import BytesIO
+    txt = []
+    with fitz.open(stream=file_bytes, filetype="pdf") as pdf:
+        for page in pdf:
+            txt.append(page.get_text())
+    text = "\n".join(txt)
+    return _heuristic_parse(text)
+
+def run_completeness(parsed: Dict[str, Any]) -> Dict[str, Any]:
+    items = []
+    def add(key, ok, note=""):
+        items.append({"key": key, "ok": bool(ok), "note": note})
+
+    course = parsed.get("course", {})
+    clos = parsed.get("clos", []) or []
+    assessments = parsed.get("assessments", []) or []
+    grading = parsed.get("grading", []) or []
+    policies = parsed.get("policies", {}) or {}
+    weekly = parsed.get("weekly_plan_present", False)
+
+    add("Course Info", course.get("code") != "CS-XXX" and course.get("title") != "Untitled Course")
+    add("CLOs present", len(clos) >= 3, f"Found {len(clos)}")
+    add("Assessments present", len(assessments) >= 2, f"Found {len(assessments)}")
+
+    total = sum([g.get("weight", 0) for g in grading])
+    add("Grading sums to 100%", total == 100, f"Total is {total}%")
+
+    add("Attendance policy", policies.get("attendance", False))
+    add("Exam policy", policies.get("examPolicy", False))
+    add("Late submission policy", policies.get("lateSubmission", False))
+    add("Weekly plan outline", weekly)
+
+    score = round(100 * sum(1 for i in items if i["ok"]) / max(1, len(items)), 2)
+    return {"score": score, "items": items}
+
+def clo_alignment_fast(clos: List[str], assessment_texts: List[str]) -> Dict[str, Any]:
+    texts = (clos or []) + (assessment_texts or [])
+    if not texts or len(texts) < 2:
+        return {"pairs": [], "matrix": [], "flags": ["Insufficient text for alignment."], "avg_top": 0.0}
+    vec = TfidfVectorizer(stop_words="english")
+    X = vec.fit_transform(texts)
+    n_clo = len(clos)
+    clo_mat = X[:n_clo]
+    asmt_mat = X[n_clo:]
+    sims = cosine_similarity(clo_mat, asmt_mat)  # [n_clo, n_asmt]
+
+    pairs, flags = [], []
+    for i, clo in enumerate(clos):
+        j = sims[i].argmax()
+        s = float(sims[i, j])
+        pairs.append({"clo": clos[i], "assessment": assessment_texts[j], "similarity": round(s, 3)})
+        if s < 0.25:
+            flags.append(f"CLO {i+1} has weak evidence (max sim {s:.2f}).")
+    avg_top = float(sum(p["similarity"] for p in pairs) / max(1, len(pairs)))
+    return {"pairs": pairs, "matrix": sims.tolist(), "flags": flags, "avg_top": round(avg_top, 3)}
+
+# ---------------------------------------------------------------
 # Authentication Routes
+# ---------------------------------------------------------------
 @api_router.post("/register")
 def register_user(user_data: UserCreate, db: Session = Depends(get_db)):
     if db.query(UserDB).filter((UserDB.username == user_data.username) | (UserDB.email == user_data.email)).first():
@@ -288,8 +410,10 @@ def login_user(login_data: UserLogin, db: Session = Depends(get_db)):
     if not user or not verify_password(login_data.password, user.password_hash):
         raise HTTPException(status_code=401, detail="Incorrect username or password")
     access_token = create_access_token(data={"sub": user.username})
+    # ---------- NEW: also return 'token' for simpler frontend usage ----------
     return {
         "access_token": access_token,
+        "token": access_token,
         "token_type": "bearer",
         "user": {
             "id": user.id,
@@ -314,7 +438,9 @@ def get_profile(current_user: UserDB = Depends(get_current_user)):
         "created_at": current_user.created_at
     }
 
+# ---------------------------------------------------------------
 # Course Management Routes
+# ---------------------------------------------------------------
 @api_router.post("/courses", response_model=Course)
 def create_course(course_data: CourseCreate, db: Session = Depends(get_db), current_user: UserDB = Depends(get_current_user)):
     course = CourseDB(
@@ -382,7 +508,9 @@ def get_course(course_id: str, db: Session = Depends(get_db), current_user: User
         created_at=course.created_at
     )
 
+# ---------------------------------------------------------------
 # File Upload Routes
+# ---------------------------------------------------------------
 @api_router.post("/courses/{course_id}/upload")
 def upload_course_folder(
     course_id: str,
@@ -420,7 +548,7 @@ def upload_course_folder(
         user_id=current_user.id,
         filename=file.filename,
         file_type=file_type,
-        file_size=file.spool_max_size if hasattr(file, "spool_max_size") else 0,
+        file_size=getattr(file, "spool_max_size", 0) or 0,
         validation_status=validation_result["status"],
         validation_details=json.dumps(validation_result)
     )
@@ -476,7 +604,7 @@ def upload_clo_file(
         with open(file_path, newline='', encoding='utf-8') as csvfile:
             reader = csv.reader(csvfile)
             for row in reader:
-                if row:  # Each row is a CLO (first column)
+                if row:
                     clos.append(row[0])
     elif file.filename.endswith('.txt'):
         with open(file_path, encoding='utf-8') as txtfile:
@@ -484,9 +612,7 @@ def upload_clo_file(
                 line = line.strip()
                 if line:
                     clos.append(line)
-    # You can add .docx/.pdf parsing if needed (requires extra libraries)
 
-    # Update course.clos if any CLOs found
     if clos:
         course.clos = json.dumps(clos)
         db.commit()
@@ -497,7 +623,9 @@ def upload_clo_file(
         "clos": clos
     }
 
-# Feedback Routes
+# ---------------------------------------------------------------
+# Feedback Routes (course-based)
+# ---------------------------------------------------------------
 @api_router.post("/courses/{course_id}/feedback")
 def submit_feedback(
     course_id: str,
@@ -534,7 +662,9 @@ def get_course_feedback(course_id: str, db: Session = Depends(get_db), current_u
         ))
     return result
 
+# ---------------------------------------------------------------
 # Quality Score and Suggestions
+# ---------------------------------------------------------------
 @api_router.get("/courses/{course_id}/quality-score")
 def get_quality_score(course_id: str, db: Session = Depends(get_db), current_user: UserDB = Depends(get_current_user)):
     latest_upload = db.query(FileUploadDB).filter(FileUploadDB.course_id == course_id).order_by(FileUploadDB.upload_date.desc()).first()
@@ -559,7 +689,7 @@ def get_quality_score(course_id: str, db: Session = Depends(get_db), current_use
         course_id=course_id,
         overall_score=overall_score,
         completeness_score=validation_result.get("completeness_percentage", 0),
-        alignment_score=75.0,
+        alignment_score=75.0,  # replaced by real avg when using /align/clo outputs in future
         feedback_score=(len([f for f in feedback_list if f.sentiment == "positive"]) / len(feedback_list) * 100) if feedback_list else 50.0,
         suggestions=json.dumps(suggestions)
     )
@@ -577,7 +707,9 @@ def get_quality_score(course_id: str, db: Session = Depends(get_db), current_use
         generated_at=quality_score.generated_at
     )
 
+# ---------------------------------------------------------------
 # Dashboard Stats
+# ---------------------------------------------------------------
 @api_router.get("/dashboard/stats")
 def get_dashboard_stats(db: Session = Depends(get_db), current_user: UserDB = Depends(get_current_user)):
     total_courses = db.query(CourseDB).count()
@@ -620,7 +752,9 @@ def get_dashboard_stats(db: Session = Depends(get_db), current_user: UserDB = De
         "recent_feedback": feedback_result
     }
 
+# ---------------------------------------------------------------
 # Initialize sample data
+# ---------------------------------------------------------------
 @api_router.post("/init-sample-data")
 def initialize_sample_data(db: Session = Depends(get_db)):
     sample_courses = [
@@ -652,6 +786,9 @@ def initialize_sample_data(db: Session = Depends(get_db)):
         }
     ]
     for course_data in sample_courses:
+        exists = db.query(CourseDB).filter(CourseDB.course_code == course_data["course_code"]).first()
+        if exists:
+            continue
         course = CourseDB(
             course_code=course_data["course_code"],
             course_name=course_data["course_name"],
@@ -664,6 +801,164 @@ def initialize_sample_data(db: Session = Depends(get_db)):
         db.add(course)
     db.commit()
     return {"message": "Sample data initialized successfully"}
+
+# ---------------------------------------------------------------
+# ---------- NEW: Parse / Completeness / Alignment APIs ----------
+# ---------------------------------------------------------------
+@api_router.post("/parse")
+async def api_parse(
+    file: UploadFile = File(...),
+    current_user: UserDB = Depends(get_current_user)
+):
+    data = await file.read()
+    ext = (file.filename or "").lower()
+    try:
+        if ext.endswith(".docx"):
+            parsed = parse_docx_bytes(data)
+        elif ext.endswith(".pdf"):
+            parsed = parse_pdf_bytes(data)
+        else:
+            return JSONResponse(status_code=400, content={"detail": "Only .pdf or .docx supported"})
+        return parsed
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"detail": str(e)})
+
+@api_router.post("/check/completeness")
+async def api_completeness(
+    payload: dict,
+    current_user: UserDB = Depends(get_current_user)
+):
+    try:
+        return run_completeness(payload)
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"detail": str(e)})
+
+@api_router.post("/align/clo")
+async def api_align(
+    payload: dict,
+    current_user: UserDB = Depends(get_current_user)
+):
+    clos = payload.get("clos", []) or []
+    assessments_texts = []
+    for a in payload.get("assessments", []) or []:
+        parts = [a.get("name", "")]
+        if a.get("desc"): parts.append(a["desc"])
+        if a.get("clos"): parts.append(" ".join(a["clos"]))
+        text = " ".join([p for p in parts if p]).strip()
+        if text:
+            assessments_texts.append(text)
+    if not assessments_texts:
+        assessments_texts = [a.get("name", "Assessment") for a in payload.get("assessments", []) or []]
+    return clo_alignment_fast(clos, assessments_texts)
+
+# ---------------------------------------------------------------
+# ---------- NEW: Batch feedback (CSV-driven) ----------
+# ---------------------------------------------------------------
+@api_router.get("/feedback/batches")
+async def api_feedback_batches(current_user: UserDB = Depends(get_current_user)):
+    # static list for demo; or derive from CSV
+    return [2022, 2023, 2024]
+
+@api_router.get("/feedback")
+async def api_feedback(batch: int, current_user: UserDB = Depends(get_current_user)):
+    csv_path = os.path.join(FEEDBACK_DIR, "cleaned_student_feedback.csv")
+    if not os.path.exists(csv_path):
+        return JSONResponse(status_code=404, content={"detail": "cleaned_student_feedback.csv not found in /frontend/public/feedback"})
+    df = pd.read_csv(csv_path)
+
+    if "batch" in df.columns:
+        df = df[df["batch"] == batch]
+
+    # sentiment counts
+    counts = df["sentiment"].value_counts().to_dict() if "sentiment" in df.columns else {}
+    sentiment = {
+        "pos": int(counts.get("positive", 0)),
+        "neu": int(counts.get("neutral", 0)),
+        "neg": int(counts.get("negative", 0)),
+    }
+
+    # per-course split
+    courses = []
+    if "course" in df.columns and "sentiment" in df.columns:
+        for c, g in df.groupby("course"):
+            vv = g["sentiment"].value_counts().to_dict()
+            courses.append({
+                "course": c,
+                "pos": int(vv.get("positive", 0)),
+                "neu": int(vv.get("neutral", 0)),
+                "neg": int(vv.get("negative", 0))
+            })
+
+    # naive themes
+    themes = []
+    if "comment" in df.columns:
+        from collections import Counter
+        words = []
+        for s in df["comment"].dropna().astype(str).tolist():
+            words += re.findall(r"[a-zA-Z]{4,}", s.lower())
+        common = Counter(words).most_common(8)
+        themes = [w for w, _ in common]
+
+    return {"sentiment": sentiment, "courses": courses, "themes": themes}
+
+# ---------------------------------------------------------------
+# ---------- NEW: Server-side PDF Report ----------
+# ---------------------------------------------------------------
+@api_router.post("/report")
+async def api_report(
+    payload: dict,
+    current_user: UserDB = Depends(get_current_user)
+):
+    from reportlab.lib.pagesizes import A4
+    from reportlab.pdfgen import canvas
+    from reportlab.lib.units import cm
+
+    buffer = io.BytesIO()
+    c = canvas.Canvas(buffer, pagesize=A4)
+    W, H = A4
+
+    def draw_title(title):
+        c.setFont("Helvetica-Bold", 16)
+        c.drawString(2*cm, H-2*cm, title)
+        c.setFont("Helvetica", 10)
+
+    draw_title("Air QA Portal — QA Report (FYP-2 Demo)")
+    y = H - 3*cm
+
+    def write_block(header, lines):
+        nonlocal y
+        c.setFont("Helvetica-Bold", 12)
+        c.drawString(2*cm, y, header)
+        y -= 0.7*cm
+        c.setFont("Helvetica", 10)
+        for ln in lines:
+            for chunk in [ln[i:i+110] for i in range(0, len(ln), 110)]:
+                c.drawString(2*cm, y, chunk)
+                y -= 0.5*cm
+            y -= 0.2*cm
+        y -= 0.3*cm
+        if y < 3*cm:
+            c.showPage(); y = H - 3*cm
+
+    parsed = payload.get("parsed", {}) or {}
+    comp = payload.get("completeness", {}) or {}
+    align = payload.get("alignment", {}) or {}
+    feed = payload.get("feedback", {}) or {}
+
+    write_block("Course", [f"{parsed.get('course', {}).get('code', '')} — {parsed.get('course', {}).get('title', '')}"])
+    write_block("Completeness",
+                [f"Score: {comp.get('score', 0)}%"] +
+                [f"- {i['key']}: {'OK' if i['ok'] else 'Missing'} ({i.get('note','')})" for i in comp.get('items', [])])
+    write_block("CLO Alignment",
+                [f"Avg Top Similarity: {align.get('avg_top', 0)}"] + align.get('flags', []))
+    s = feed.get('sentiment', {})
+    write_block("Feedback (batch)",
+                [f"Positive: {s.get('pos',0)}  Neutral: {s.get('neu',0)}  Negative: {s.get('neg',0)}"])
+
+    c.showPage(); c.save()
+    buffer.seek(0)
+    return StreamingResponse(buffer, media_type="application/pdf",
+                             headers={"Content-Disposition": "attachment; filename=qa_report.pdf"})
 
 # Include the router
 app.include_router(api_router)

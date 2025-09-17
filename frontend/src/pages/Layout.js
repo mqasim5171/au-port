@@ -1,5 +1,6 @@
-import React from 'react';
-import { Outlet, Link, useLocation } from 'react-router-dom';
+// src/layout/Layout.js
+import React, { useEffect, useState } from 'react';
+import { Outlet, Link, useLocation, useNavigate } from 'react-router-dom';
 import { 
   HomeIcon, 
   FolderIcon, 
@@ -9,11 +10,31 @@ import {
   DocumentTextIcon,
   ArrowRightOnRectangleIcon
 } from '@heroicons/react/24/outline';
-
+import api from '../api';
 import '../App.css';
 
-const Layout = ({ user, onLogout }) => {
+const Layout = ({ user: userProp, onLogout }) => {
   const location = useLocation();
+  const navigate = useNavigate();
+  const [user, setUser] = useState(userProp || null);
+
+  // If we reload the app and lose in-memory user, fetch from /api/profile using the stored token
+  useEffect(() => {
+    const token = localStorage.getItem('token');
+    if (!token) {
+      navigate('/login');
+      return;
+    }
+    if (!userProp) {
+      api.get('/profile')
+        .then(res => setUser(res.data))
+        .catch(() => {
+          // token might be invalid/expired
+          localStorage.removeItem('token');
+          navigate('/login');
+        });
+    }
+  }, [userProp, navigate]);
 
   const navigation = [
     { name: 'Dashboard', href: '/dashboard', icon: HomeIcon },
@@ -24,7 +45,19 @@ const Layout = ({ user, onLogout }) => {
     { name: 'Reports', href: '/reports', icon: DocumentTextIcon },
   ];
 
-  const isActive = (href) => location.pathname === href;
+  // Active if current path starts with the item path (so nested routes highlight too)
+  const isActive = (href) => location.pathname === href || location.pathname.startsWith(href + '/');
+
+  const handleLogout = () => {
+    try { if (onLogout) onLogout(); } catch {}
+    localStorage.removeItem('token');
+    navigate('/login');
+  };
+
+  const initial =
+    (user?.full_name?.trim?.()[0]) ||
+    (user?.username?.trim?.()[0]) ||
+    'U';
 
   return (
     <div className="layout-container">
@@ -52,16 +85,17 @@ const Layout = ({ user, onLogout }) => {
 
         <div className="sidebar-footer">
           <div className="user-info">
-            <div className="user-avatar">
-              {user?.full_name?.charAt(0) || user?.username?.charAt(0) || 'U'}
-            </div>
+            <div className="user-avatar">{initial}</div>
             <div className="user-details">
-              <h4>{user?.full_name || user?.username}</h4>
-              <p>{user?.role} • {user?.department}</p>
+              <h4>{user?.full_name || user?.username || 'User'}</h4>
+              <p>
+                {(user?.role || 'user')}
+                {user?.department ? ` • ${user.department}` : ''}
+              </p>
             </div>
           </div>
-          
-          <button onClick={onLogout} className="btn-logout">
+
+          <button onClick={handleLogout} className="btn-logout">
             <ArrowRightOnRectangleIcon style={{ width: '16px', marginRight: '8px' }} />
             Logout
           </button>
