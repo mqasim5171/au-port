@@ -18,7 +18,7 @@ function App() {
     if (token) {
       api.defaults.headers.common['Authorization'] = `Bearer ${token}`;
       // Optionally fetch user profile
-      api.get('/profile').then(res => setUser(res.data)).catch(() => handleLogout());
+      api.get('/auth/me').then(res => setUser(res.data)).catch(() => handleLogout());
     }
   }, []);
 

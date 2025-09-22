@@ -1,6 +1,18 @@
 import React, { useState } from "react";
 import api from "../api";
-import "../App.css";
+import "./Login.css";
+
+const extractErrMsg = (err) => {
+  const d = err?.response?.data;
+  if (!d) return err?.message || "Login failed";
+  if (typeof d === "string") return d;
+  if (typeof d.detail === "string") return d.detail;
+  if (Array.isArray(d.detail)) {
+    const msgs = d.detail.map((e) => e?.msg || JSON.stringify(e));
+    return msgs.join(", ");
+  }
+  return JSON.stringify(d);
+};
 
 const Login = ({ onLogin }) => {
   const [username, setUsername] = useState("");
@@ -13,13 +25,35 @@ const Login = ({ onLogin }) => {
     setError("");
     setBusy(true);
     try {
-      const { data } = await api.post("/login", { username, password });
-      // server returns both access_token and token
-      localStorage.setItem("token", data.token || data.access_token);
-      if (onLogin) onLogin(data.user);
-      window.location.href = "/dashboard";
+      const body = new URLSearchParams();
+      body.append("grant_type", "password"); // required by OAuth2PasswordRequestForm
+      body.append("username", username);
+      body.append("password", password);
+      body.append("scope", "");               // ok to be empty
+      body.append("client_id", "");           // optional
+      body.append("client_secret", "");       // optional
+
+      const { data } = await api.post("/auth/login", body, {
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      });
+
+      const token = data.access_token || data.token;
+      if (!token) throw new Error("No token returned from server");
+      localStorage.setItem("token", token);
+
+      // Optional: fetch current user
+      let me = null;
+      try {
+        const res = await api.get("/auth/me", {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        me = res.data;
+      } catch {}
+
+      if (onLogin) onLogin(me);
+      window.location.href = "/dashboard"; // React route; backend doesn’t need this endpoint
     } catch (err) {
-      setError(err?.response?.data?.detail || "Login failed");
+      setError(extractErrMsg(err));
     } finally {
       setBusy(false);
     }
@@ -33,7 +67,7 @@ const Login = ({ onLogin }) => {
           <p className="login-subtitle">Sign in to continue</p>
         </div>
 
-        {error && <div className="error-message">{error}</div>}
+        {error ? <div className="error-message">{String(error)}</div> : null}
 
         <form onSubmit={handleSubmit}>
           <div className="form-group">

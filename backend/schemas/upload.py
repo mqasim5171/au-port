@@ -1,20 +1,16 @@
-# schemas/uploads.py
-#pendamic responce....
-
-
 from pydantic import BaseModel
-from typing import List, Optional, Literal, Any, Dict
+from typing import List, Optional, Any, Dict
 
 class UploadItem(BaseModel):
     id: str
     filename_original: str
     filename_stored: str
     ext: str
-    file_type_guess: Optional[str]
-    week_no: Optional[int]
+    file_type_guess: Optional[str] = None
+    week_no: Optional[int] = None
     bytes: int
-    pages: Optional[int]
-    version: int
+    pages: Optional[int] = None
+    version: int = 1
 
 class UploadResponse(BaseModel):
     files: List[UploadItem]
