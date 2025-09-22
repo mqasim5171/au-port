@@ -15,7 +15,7 @@ if not DATABASE_URL:
 # ----------------------------
 # 2. Load processed CSV
 # ----------------------------
-csv_file = "../public/feedback/cleaned_student_feedback.csv"
+csv_file = "/Users/macbookair/Desktop/au-port/frontend/public/feedback/cleaned_student_feedback.csv"
 df = pd.read_csv(csv_file)
 
 print(f"📂 Loaded {len(df)} rows from {csv_file}")
@@ -51,8 +51,34 @@ with engine.begin() as conn:
 print("✅ Table student_feedback ready.")
 
 # ----------------------------
-# 5. Insert DataFrame into PostgreSQL
+# 5. Fix column names & Insert DataFrame
 # ----------------------------
+column_mapping = {
+    "StudentID": "student_id",
+    "Name": "name",
+    "FormType": "form_type",
+    "MCQ_Number": "mcq_number",
+    "Answer": "answer",
+    "InstructorName": "instructor_name",
+    "course": "course_name",
+    "comment": "comments",
+    "sentiment": "sentiment",
+    "Emotion": "emotion",
+    "Topic": "topic",
+    "batch": "batch"   # ✅ keep it
+}
+
+
+df = df.rename(columns=column_mapping)
+
+# Keep only DB columns
+df = df[[*column_mapping.values()]]
+
+# 🔑 Convert types for DB compatibility
+df["mcq_number"] = pd.to_numeric(df["mcq_number"], errors="coerce").astype("Int64")
+df["topic"] = pd.to_numeric(df["topic"], errors="coerce").astype("Int64")
+
+# Insert into PostgreSQL
 df.to_sql("student_feedback", engine, if_exists="append", index=False)
 
 print("🎉 Migration complete! Data inserted into AWS PostgreSQL.")

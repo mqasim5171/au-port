@@ -2,15 +2,14 @@
 import os
 from pathlib import Path
 from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy.orm import sessionmaker, declarative_base  # ✅ add declarative_base
 
-# --- Load .env from the backend directory (this file lives in backend/core/) ---
+# --- Load .env from the backend directory ---
 try:
     from dotenv import load_dotenv
-    BACKEND_DIR = Path(__file__).resolve().parent.parent  # .../backend
+    BACKEND_DIR = Path(__file__).resolve().parent.parent
     load_dotenv(BACKEND_DIR / ".env")
 except Exception:
-    # dotenv is optional during tests, but for dev you should install it
     pass
 
 DB_URL = os.getenv("DATABASE_URL")
@@ -22,7 +21,6 @@ if not DB_URL:
 
 connect_args = {}
 if DB_URL.startswith("postgresql+"):
-    # RDS public instance → enforce SSL
     connect_args["sslmode"] = "require"
 
 engine = create_engine(
@@ -34,5 +32,14 @@ engine = create_engine(
 
 print("DB_URL:", DB_URL)
 
-
 SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False, future=True)
+
+# ✅ add this
+Base = declarative_base()
+
+def get_db():
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
