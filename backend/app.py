@@ -3,6 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from routers import auth, users, courses, uploads, feedback, quality, health, dashboard
 from core.schema_guard import ensure_all_tables_once
+from routers import student_feedback
 
 app = FastAPI(title="Air QA Backend")
 
@@ -26,6 +27,8 @@ app.include_router(feedback.router)
 app.include_router(quality.router)
 app.include_router(health.router)
 app.include_router(dashboard.router)
+app.include_router(student_feedback.router)
+
 
 @app.on_event("startup")
 def _startup_schema():
