@@ -1,4 +1,3 @@
-# routers/courses.py
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, status
 from sqlalchemy.orm import Session
 from pathlib import Path
@@ -40,14 +39,15 @@ async def _save_course_upload(course_id: str, file: UploadFile, db: Session, cur
     rec = FileUpload(
         id=str(uuid4()),
         course_id=course_id,
-        user_id=current.id,                # <-- IMPORTANT (NOT NULL)
+        user_id=current.id,
         filename=file.filename,
-        file_type=getattr(file, "content_type", None),
-        file_size=total_bytes or None,
+        file_type=file.content_type,
+        file_size=total_bytes,
         upload_date=datetime.now(timezone.utc),
         validation_status="pending",
-        # file_path=str(dest),              # uncomment if you have this column
+        validation_details="Not validated yet",
     )
+
     db.add(rec)
     db.commit()
     db.refresh(rec)
@@ -56,7 +56,7 @@ async def _save_course_upload(course_id: str, file: UploadFile, db: Session, cur
         "id": rec.id,
         "filename": rec.filename,
         "upload_date": rec.upload_date,
-        "validation_status": (rec.validation_status or "pending").lower(),
+        "validation_status": rec.validation_status,
     }
 
 @router.get("", response_model=list[CourseOut])
@@ -94,25 +94,11 @@ def list_course_uploads(course_id: str, db: Session = Depends(get_db), current=D
             "id": u.id,
             "filename": u.filename,
             "upload_date": u.upload_date,
-            "validation_status": (u.validation_status or "pending").lower(),
+            "validation_status": u.validation_status,
         }
         for u in uploads
     ]
 
 @router.post("/{course_id}/upload")
-async def upload_course_file(
-    course_id: str,
-    file: UploadFile = File(...),
-    db: Session = Depends(get_db),
-    current = Depends(get_current_user),
-):
-    return await _save_course_upload(course_id, file, db, current)
-
-@router.post("/{course_id}/upload-clo")
-async def upload_course_clo(
-    course_id: str,
-    file: UploadFile = File(...),
-    db: Session = Depends(get_db),
-    current = Depends(get_current_user),
-):
+async def upload_course_file(course_id: str, file: UploadFile = File(...), db: Session = Depends(get_db), current=Depends(get_current_user)):
     return await _save_course_upload(course_id, file, db, current)

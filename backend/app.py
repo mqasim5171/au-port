@@ -1,11 +1,12 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from routers import auth, users, courses, uploads, feedback, quality, health, dashboard
+from routers import auth, users, courses, uploads, feedback, quality, health, dashboard,clo_alignment,course_clo
 from core.schema_guard import ensure_all_tables_once
 from routers import student_feedback
 
 app = FastAPI(title="Air QA Backend")
+
 
 # IMPORTANT: with allow_credentials=True, you CANNOT use "*" for origins.
 ALLOWED_ORIGINS = ["http://localhost:3000", "http://127.0.0.1:3000"]
@@ -25,6 +26,8 @@ app.include_router(courses.router)
 app.include_router(uploads.router)
 app.include_router(feedback.router)
 app.include_router(quality.router)
+app.include_router(course_clo.router)
+app.include_router(clo_alignment.router)
 app.include_router(health.router)
 app.include_router(dashboard.router)
 app.include_router(student_feedback.router)

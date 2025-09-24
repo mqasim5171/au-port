@@ -13,8 +13,8 @@ class FileUpload(Base):
     course_id: Mapped[str] = mapped_column(String(36))
     user_id: Mapped[str] = mapped_column(String(36))
     filename: Mapped[str] = mapped_column(String(255))
-    file_type: Mapped[str] = mapped_column(String(50))
+    file_type: Mapped[str] = mapped_column(String(255))
     file_size: Mapped[int] = mapped_column(Integer)
-    validation_status: Mapped[str] = mapped_column(String(50))
+    validation_status: Mapped[str] = mapped_column(String(255))
     validation_details: Mapped[str] = mapped_column(Text)  # JSON string
     upload_date: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))

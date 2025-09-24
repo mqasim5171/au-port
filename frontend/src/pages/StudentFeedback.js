@@ -4,33 +4,39 @@ import "../App.css";
 
 let Charts = null;
 try {
-  // optional; if recharts is not installed, the component still renders tables
-  // npm i recharts (if you want charts)
   Charts = require("recharts");
 } catch {}
 
 function StudentFeedback() {
   const [batches, setBatches] = useState([]);
   const [batch, setBatch] = useState("");
+  const [course, setCourse] = useState("");
+  const [instructor, setInstructor] = useState("");
   const [data, setData] = useState(null);
   const [err, setErr] = useState("");
 
   useEffect(() => {
     api.get("/feedback/batches")
-       .then(res => {
-         setBatches(res.data || []);
-         if ((res.data || []).length) setBatch(res.data[0]);
-       })
-       .catch(() => setBatches([]));
+      .then(res => {
+        setBatches(res.data || []);
+        if ((res.data || []).length) setBatch(res.data[0]);
+      })
+      .catch(() => setBatches([]));
   }, []);
 
   useEffect(() => {
     if (!batch) return;
     setErr("");
-    api.get("/feedback", { params: { batch } })
-       .then(res => setData(res.data))
-       .catch(e => setErr(e?.response?.data?.detail || "Failed to load feedback"));
-  }, [batch]);
+    api.get("/feedback", {
+      params: {
+        batch,
+        course: course || undefined,
+        instructor: instructor || undefined
+      }
+    })
+      .then(res => setData(res.data))
+      .catch(e => setErr(e?.response?.data?.detail || "Failed to load feedback"));
+  }, [batch, course, instructor]);
 
   const pieData = data ? [
     { name: "Positive", value: data?.sentiment?.pos || 0 },
@@ -45,33 +51,68 @@ function StudentFeedback() {
         <p className="page-subtitle">Batch-wise sentiment and themes</p>
       </div>
 
+      {/* Filter Controls */}
       <div className="card" style={{ marginBottom: 24 }}>
         <div className="card-header">
-          <h2 className="card-title">Select Batch</h2>
+          <h2 className="card-title">Filters</h2>
         </div>
-        <div className="card-content">
-          <select
-            className="form-input"
-            value={batch || ""}
-            onChange={(e) => setBatch(parseInt(e.target.value))}
-            style={{ maxWidth: 260 }}
-          >
-            <option value="">Choose a batch...</option>
-            {batches.map((b) => (
-              <option key={b} value={b}>{b}</option>
-            ))}
-          </select>
-          {err && <p style={{ color: "#dc2626", marginTop: 8 }}>{err}</p>}
+        <div className="card-content" style={{ display: "flex", gap: 16, flexWrap: "wrap" }}>
+          {/* Batch filter */}
+          <div>
+            <label className="form-label">Batch</label>
+            <select
+              className="form-input"
+              value={batch || ""}
+              onChange={(e) => setBatch(parseInt(e.target.value))}
+              style={{ minWidth: 160 }}
+            >
+              <option value="">Choose a batch...</option>
+              {batches.map((b) => (
+                <option key={b} value={b}>{b}</option>
+              ))}
+            </select>
+          </div>
+
+          {/* Course filter */}
+          <div>
+            <label className="form-label">Course</label>
+            <input
+              className="form-input"
+              type="text"
+              placeholder="Enter course code/name"
+              value={course}
+              onChange={(e) => setCourse(e.target.value)}
+              style={{ minWidth: 200 }}
+            />
+          </div>
+
+          {/* Instructor filter */}
+          <div>
+            <label className="form-label">Instructor</label>
+            <input
+              className="form-input"
+              type="text"
+              placeholder="Enter instructor name"
+              value={instructor}
+              onChange={(e) => setInstructor(e.target.value)}
+              style={{ minWidth: 200 }}
+            />
+          </div>
         </div>
+        {err && <p style={{ color: "#dc2626", marginTop: 8 }}>{err}</p>}
       </div>
 
+      {/* Feedback Results */}
       {data && (
         <div className="card">
           <div className="card-header">
-            <h2 className="card-title">Batch {batch} — Overview</h2>
+            <h2 className="card-title">
+              Batch {batch} — Overview
+              {course && <> | Course: <b>{course}</b></>}
+              {instructor && <> | Instructor: <b>{instructor}</b></>}
+            </h2>
           </div>
           <div className="card-content">
-            {/* Charts if recharts available */}
             {Charts ? (
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 24 }}>
                 <div>
