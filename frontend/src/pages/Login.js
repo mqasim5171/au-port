@@ -1,18 +1,7 @@
 import React, { useState } from "react";
 import api from "../api";
-import "./Login.css";
-
-const extractErrMsg = (err) => {
-  const d = err?.response?.data;
-  if (!d) return err?.message || "Login failed";
-  if (typeof d === "string") return d;
-  if (typeof d.detail === "string") return d.detail;
-  if (Array.isArray(d.detail)) {
-    const msgs = d.detail.map((e) => e?.msg || JSON.stringify(e));
-    return msgs.join(", ");
-  }
-  return JSON.stringify(d);
-};
+import "../App.css";
+import { DotLottieReact } from "@lottiefiles/dotlottie-react";
 
 const Login = ({ onLogin }) => {
   const [username, setUsername] = useState("");
@@ -25,35 +14,12 @@ const Login = ({ onLogin }) => {
     setError("");
     setBusy(true);
     try {
-      const body = new URLSearchParams();
-      body.append("grant_type", "password"); // required by OAuth2PasswordRequestForm
-      body.append("username", username);
-      body.append("password", password);
-      body.append("scope", "");               // ok to be empty
-      body.append("client_id", "");           // optional
-      body.append("client_secret", "");       // optional
-
-      const { data } = await api.post("/auth/login", body, {
-        headers: { "Content-Type": "application/x-www-form-urlencoded" },
-      });
-
-      const token = data.access_token || data.token;
-      if (!token) throw new Error("No token returned from server");
-      localStorage.setItem("token", token);
-
-      // Optional: fetch current user
-      let me = null;
-      try {
-        const res = await api.get("/auth/me", {
-          headers: { Authorization: `Bearer ${token}` },
-        });
-        me = res.data;
-      } catch {}
-
-      if (onLogin) onLogin(me);
-      window.location.href = "/dashboard"; // React route; backend doesn’t need this endpoint
+      const { data } = await api.post("/auth/login", { username, password });
+      localStorage.setItem("token", data.token || data.access_token);
+      if (onLogin) onLogin(data.user);
+      window.location.href = "/auth/me";
     } catch (err) {
-      setError(extractErrMsg(err));
+      setError(err?.response?.data?.detail || "Login failed");
     } finally {
       setBusy(false);
     }
@@ -61,17 +27,28 @@ const Login = ({ onLogin }) => {
 
   return (
     <div className="login-container">
+      {/* 🔹 Left side Lottie Animation */}
+      <div className="login-animation">
+        <DotLottieReact
+          src="https://lottie.host/8e27a9ca-5930-40a4-b5dc-f9e769ad09b2/2JJ5qDWACb.lottie"
+          loop
+          autoplay
+          className="login-lottie"
+        />
+      </div>
+
+      {/* 🔹 Right side Form */}
       <div className="login-card">
         <div className="login-header">
           <h1 className="login-title">AIR QA Portal</h1>
           <p className="login-subtitle">Sign in to continue</p>
         </div>
 
-        {error ? <div className="error-message">{String(error)}</div> : null}
+        {error && <div className="error-message">{error}</div>}
 
         <form onSubmit={handleSubmit}>
           <div className="form-group">
-            <label className="form-label">Username</label>
+            <label className="form-label">USERNAME:</label>
             <input
               className="form-input"
               placeholder="Enter username"
@@ -81,7 +58,7 @@ const Login = ({ onLogin }) => {
             />
           </div>
           <div className="form-group">
-            <label className="form-label">Password</label>
+            <label className="form-label">PASSWORD :</label>
             <input
               className="form-input"
               type="password"
