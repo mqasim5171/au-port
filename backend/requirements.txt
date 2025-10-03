@@ -39,7 +39,8 @@ python-jose[cryptography]>=3.3.0
 passlib[bcrypt]>=1.7.4     
 python-multipart>=0.0.9    
 email-validator>=2.1.0
-sentence-transformers>=2.2,<3
-transformers<5
-torch>=2.1,<2.6
+torch==2.5.1+cpu
+transformers==4.46.2
+sentence-transformers==2.7.0
+
 
