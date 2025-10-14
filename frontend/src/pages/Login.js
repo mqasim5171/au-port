@@ -1,25 +1,64 @@
 import React, { useState } from "react";
+import { useNavigate } from "react-router-dom";
 import api from "../api";
 import "../App.css";
 import { DotLottieReact } from "@lottiefiles/dotlottie-react";
 
 const Login = ({ onLogin }) => {
-  const [username, setUsername] = useState("");
+  const [username, setUsername] = useState(""); // username OR email
   const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const navigate = useNavigate();
 
   const handleSubmit = async (e) => {
     e.preventDefault();
     setError("");
+
+    const u = username.trim();
+    if (!u || !password) {
+      setError("Please enter username/email and password");
+      return;
+    }
+
     setBusy(true);
     try {
-      const { data } = await api.post("/auth/login", { username, password });
-      localStorage.setItem("token", data.token || data.access_token);
-      if (onLogin) onLogin(data.user);
-      window.location.href = "/auth/me";
+      // 1) Login
+      const { data } = await api.post(
+        "/auth/login",
+        { username: u, password },
+        { headers: { "Content-Type": "application/json" } }
+      );
+
+      const token = data?.access_token || data?.token;
+      if (!token) throw new Error("No token returned by server");
+
+      // 2) Persist the token AND force it for the very next call
+      localStorage.setItem("token", token);
+      api.defaults.headers.common.Authorization = `Bearer ${token}`;
+
+      // 3) Fetch me with an explicit header to avoid interceptor timing issues
+      const meResp = await api.get("/auth/me", {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+
+      if (onLogin) onLogin(meResp.data);
+
+      // 4) Navigate only after both succeed
+      navigate("/", { replace: true });
     } catch (err) {
-      setError(err?.response?.data?.detail || "Login failed");
+      // Show the real server message if present
+      const status = err?.response?.status;
+      const server = err?.response?.data;
+      console.error("LOGIN ERROR:", status, server || err?.message || err);
+
+      let msg =
+        server?.detail ||
+        server?.message ||
+        (status === 401 ? "Invalid username/email or password" : null) ||
+        err?.message ||
+        "Login failed";
+      setError(msg);
     } finally {
       setBusy(false);
     }
@@ -27,7 +66,6 @@ const Login = ({ onLogin }) => {
 
   return (
     <div className="login-container">
-      {/* 🔹 Left side Lottie Animation */}
       <div className="login-animation">
         <DotLottieReact
           src="https://lottie.host/8e27a9ca-5930-40a4-b5dc-f9e769ad09b2/2JJ5qDWACb.lottie"
@@ -37,7 +75,6 @@ const Login = ({ onLogin }) => {
         />
       </div>
 
-      {/* 🔹 Right side Form */}
       <div className="login-card">
         <div className="login-header">
           <h1 className="login-title">AIR QA Portal</h1>
@@ -48,17 +85,18 @@ const Login = ({ onLogin }) => {
 
         <form onSubmit={handleSubmit}>
           <div className="form-group">
-            <label className="form-label">USERNAME:</label>
+            <label className="form-label">USERNAME / EMAIL</label>
             <input
               className="form-input"
-              placeholder="Enter username"
+              placeholder="Enter username or email"
               value={username}
               onChange={(e) => setUsername(e.target.value)}
               autoComplete="username"
+              disabled={busy}
             />
           </div>
           <div className="form-group">
-            <label className="form-label">PASSWORD :</label>
+            <label className="form-label">PASSWORD</label>
             <input
               className="form-input"
               type="password"
@@ -66,6 +104,10 @@ const Login = ({ onLogin }) => {
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               autoComplete="current-password"
+              disabled={busy}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && !busy) handleSubmit(e);
+              }}
             />
           </div>
           <button className="btn-primary" type="submit" disabled={busy}>
