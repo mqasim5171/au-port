@@ -1,7 +1,10 @@
 # backend/routers/auth.py
-from fastapi import APIRouter, Depends, HTTPException, status, Request
-from fastapi.security import OAuth2PasswordBearer
+from fastapi import APIRouter, Depends, HTTPException
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.orm import Session
+from pydantic import BaseModel, model_validator
+from typing import Optional
+
 from core.db import SessionLocal
 from core.security import (
     hash_password,
@@ -11,14 +14,13 @@ from core.security import (
     decode_token,
 )
 from schemas.user import UserCreate, UserOut
-from schemas.auth import TokenOut  # keep using your existing TokenOut schema
+from schemas.auth import TokenOut
 from models.user import User
 
 router = APIRouter(prefix="/auth", tags=["Auth"])
 
-# Works with Swagger "Authorize" button
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/login")
-
+# Swagger "Authorize" shows a single token box
+bearer_scheme = HTTPBearer()
 
 def get_db():
     db = SessionLocal()
@@ -27,10 +29,8 @@ def get_db():
     finally:
         db.close()
 
-
 @router.post("/register", response_model=UserOut, status_code=201)
 def register(payload: UserCreate, db: Session = Depends(get_db)):
-    # prevent duplicate email or username
     existing = db.query(User).filter(
         (User.email == payload.email) | (User.username == payload.username)
     ).first()
@@ -50,45 +50,27 @@ def register(payload: UserCreate, db: Session = Depends(get_db)):
     db.refresh(user)
     return user
 
+class LoginJSON(BaseModel):
+    username: Optional[str] = None   # username OR email
+    password: str
+
+    @model_validator(mode="after")
+    def _require_username(self):
+        if not (self.username and self.username.strip()):
+            raise ValueError("Provide username or email")
+        return self
 
 @router.post("/login", response_model=TokenOut)
-async def login(request: Request, db: Session = Depends(get_db)):
-    """
-    Accepts BOTH:
-      - JSON: { "username":"...", "password":"..." } OR { "email":"...", "password":"..." }
-      - form:  username=...&password=...  (Swagger uses this)
-    And allows login with username OR email.
-    """
-    ct = request.headers.get("content-type", "")
-    identifier = None
-    password = None
-
-    if ct.startswith("application/json"):
-        body = await request.json()
-        identifier = (body or {}).get("username") or (body or {}).get("email")
-        password = (body or {}).get("password")
-    else:
-        form = await request.form()
-        identifier = form.get("username") or form.get("email")
-        password = form.get("password")
-
-    if not identifier or not password:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail="username/email and password are required",
-        )
-
-    # Decide whether identifier is email or username
+def login_json(payload: LoginJSON, db: Session = Depends(get_db)):
+    identifier = payload.username.strip()
     q = (User.email == identifier) if ("@" in identifier) else (User.username == identifier)
     user = db.query(User).filter(q).first()
-
-    if not user or not verify_password(password, user.password_hash):
+    if not user or not verify_password(payload.password, user.password_hash):
         raise HTTPException(status_code=401, detail="Invalid credentials")
 
-    access = create_access_token(user.id)       # your helpers already use "sub"
+    access = create_access_token(user.id)
     refresh = create_refresh_token(user.id)
 
-    # Return standard token payload; extra "user" is fine (response_model will filter if needed)
     return {
         "access_token": access,
         "token_type": "bearer",
@@ -103,21 +85,19 @@ async def login(request: Request, db: Session = Depends(get_db)):
         },
     }
 
-
 def get_current_user(
-    token: str = Depends(oauth2_scheme),
+    credentials: HTTPAuthorizationCredentials = Depends(bearer_scheme),
     db: Session = Depends(get_db),
 ) -> User:
+    token = credentials.credentials
     data = decode_token(token)
     if not data or "sub" not in data:
         raise HTTPException(status_code=401, detail="Invalid or expired token")
 
     user = db.get(User, data["sub"])
-    # Your User model doesn't define is_active; just check existence
     if not user:
         raise HTTPException(status_code=401, detail="User not found")
     return user
-
 
 @router.get("/me", response_model=UserOut)
 def me(current: User = Depends(get_current_user)):
