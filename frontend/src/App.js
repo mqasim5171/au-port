@@ -8,54 +8,77 @@ import CLOAlignment from "./pages/CLOAlignment";
 import StudentFeedback from "./pages/StudentFeedback";
 import Suggestions from "./pages/Suggestions";
 import Reports from "./pages/Reports";
-import api from './api';
+import api from "./api";
 
 function App() {
   const [user, setUser] = useState(null);
+  const [bootstrapped, setBootstrapped] = useState(false);
 
+  // Rehydrate from localStorage and validate token once
   useEffect(() => {
-    const token = localStorage.getItem('token');
-    if (token) {
-      api.defaults.headers.common['Authorization'] = `Bearer ${token}`;
-      // Optionally fetch user profile
-      api.get('/auth/me').then(res => setUser(res.data)).catch(() => handleLogout());
+    const token = localStorage.getItem("token");
+    if (!token) {
+      setBootstrapped(true);
+      return;
     }
+    api.defaults.headers.common.Authorization = `Bearer ${token}`;
+    (async () => {
+      try {
+        const me = await api.get("/auth/me", {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        setUser(me.data);
+      } catch {
+        // Bad/expired token: clear and stay logged out
+        localStorage.removeItem("token");
+        delete api.defaults.headers.common.Authorization;
+        setUser(null);
+      } finally {
+        setBootstrapped(true);
+      }
+    })();
   }, []);
 
-  const handleLogin = async (username, password) => {
-    try {
-      const res = await api.post('/login', { username, password });
-      setUser(res.data.user);
-      localStorage.setItem('token', res.data.access_token);
-      api.defaults.headers.common['Authorization'] = `Bearer ${res.data.access_token}`;
-    } catch (err) {
-      alert('Login failed');
-    }
+  // IMPORTANT: Login handler should NOT call the API again.
+  // Login.jsx already did /auth/login and /auth/me and passes us the user.
+  const handleLogin = (me) => {
+    setUser(me);
   };
 
   const handleLogout = () => {
     setUser(null);
-    localStorage.removeItem('token');
-    delete api.defaults.headers.common['Authorization'];
+    localStorage.removeItem("token");
+    delete api.defaults.headers.common.Authorization;
   };
+
+  if (!bootstrapped) {
+    // Optional: show nothing or a tiny loader to avoid flicker
+    return null;
+  }
 
   return (
     <Router>
       <Routes>
         {!user ? (
-          <Route path="/login" element={<Login onLogin={handleLogin} />} />
+          <>
+            <Route path="/login" element={<Login onLogin={handleLogin} />} />
+            <Route path="*" element={<Navigate to="/login" replace />} />
+          </>
         ) : (
-          <Route element={<Layout user={user} onLogout={handleLogout} />}>
-            <Route path="/dashboard" element={<Dashboard />} />
-            <Route path="/course-folder" element={<CourseFolder />} />
-            <Route path="/clo-alignment" element={<CLOAlignment />} />
-            <Route path="/student-feedback" element={<StudentFeedback />} />
-            <Route path="/suggestions" element={<Suggestions />} />
-            <Route path="/reports" element={<Reports />} />
-          </Route>
+          <>
+            <Route element={<Layout user={user} onLogout={handleLogout} />}>
+              <Route path="/dashboard" element={<Dashboard />} />
+              <Route path="/course-folder" element={<CourseFolder />} />
+              <Route path="/clo-alignment" element={<CLOAlignment />} />
+              <Route path="/student-feedback" element={<StudentFeedback />} />
+              <Route path="/suggestions" element={<Suggestions />} />
+              <Route path="/reports" element={<Reports />} />
+              {/* convenience: hit "/" goes to dashboard when logged in */}
+              <Route path="/" element={<Navigate to="/dashboard" replace />} />
+            </Route>
+            <Route path="*" element={<Navigate to="/dashboard" replace />} />
+          </>
         )}
-        {/* Redirects */}
-        <Route path="*" element={<Navigate to={user ? "/dashboard" : "/login"} />} />
       </Routes>
     </Router>
   );
