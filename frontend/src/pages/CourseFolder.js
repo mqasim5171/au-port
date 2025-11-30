@@ -1,5 +1,4 @@
-// src/pages/CourseFolder.js
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useCallback } from "react";
 import api from "../api";
 import {
   CloudArrowUpIcon,
@@ -28,7 +27,26 @@ export default function CourseFolder() {
   const [uploadLoading, setUploadLoading] = useState(false);
   const [pageErr, setPageErr] = useState("");
 
-  // load courses
+  // Memoize loadUploads to avoid unnecessary rerenders
+  const loadUploads = useCallback(() => {
+    if (!selectedCourse) return;  // Do nothing if no course is selected
+    setLoading(true);  // Show loading indicator
+    setPageErr("");  // Clear any previous error
+    api
+      .get(`/upload/${selectedCourse}/list`)
+      .then((res) => {
+        console.log("Fetched Uploads: ", res.data);  // Log the upload data
+        setUploads(res.data || []);  // Set the uploads state
+      })
+      .catch((e) => {
+        const msg = extractErr(e);
+        setPageErr(msg);
+        if (e?.response?.status === 401) window.location.href = "/login";
+      })
+      .finally(() => setLoading(false));  // Hide loading after fetch completes
+  }, [selectedCourse]);
+
+  // Load courses on initial render
   useEffect(() => {
     setPageErr("");
     api
@@ -41,28 +59,12 @@ export default function CourseFolder() {
       });
   }, []);
 
-  const loadUploads = () => {
-    if (!selectedCourse) return;
-    setLoading(true);
-    setPageErr("");
-    api
-      // ✅ now points to validator history endpoint
-      .get(`/upload/${selectedCourse}/list`)
-      .then((res) => setUploads(res.data || []))
-      .catch((e) => {
-        const msg = extractErr(e);
-        setPageErr(msg);
-        if (e?.response?.status === 401) window.location.href = "/login";
-      })
-      .finally(() => setLoading(false));
-  };
-
   useEffect(() => {
     if (selectedCourse) loadUploads();
     else setUploads([]);
-  }, [selectedCourse]);
+  }, [selectedCourse, loadUploads]);
 
-  const handleCourseUpload = async (event) => {
+  const handleCourseUpload = async (folder, event) => {
     const file = event.target.files?.[0];
     if (!file) return;
     if (!selectedCourse) return alert("Please select a course first.");
@@ -71,39 +73,17 @@ export default function CourseFolder() {
     try {
       const fd = new FormData();
       fd.append("file", file);
-      // ✅ now points to validator upload endpoint
-      await api.post(`/upload/${selectedCourse}`, fd);
-      await loadUploads();
+      // Upload the file to a specific folder
+      await api.post(`/upload/${selectedCourse}/${folder}`, fd);
+      await loadUploads(); // Trigger immediate validation after upload
     } catch (e) {
       const msg = extractErr(e);
       setPageErr(msg);
-      alert(`Error uploading course folder: ${msg}`);
+      alert(`Error uploading file to ${folder}: ${msg}`);
       if (e?.response?.status === 401) window.location.href = "/login";
     } finally {
       setUploadLoading(false);
-      event.target.value = "";
-    }
-  };
-
-  const handleCLOUpload = async (event) => {
-    const file = event.target.files?.[0];
-    if (!file) return;
-    if (!selectedCourse) return alert("Please select a course first.");
-    setUploadLoading(true);
-    setPageErr("");
-    try {
-      const fd = new FormData();
-      fd.append("file", file);
-      // CLO uploads stay under /courses
-      await api.post(`/courses/${selectedCourse}/upload-clo`, fd);
-      alert("CLO file uploaded successfully!");
-    } catch (e) {
-      const msg = extractErr(e);
-      setPageErr(msg);
-      alert(`Error uploading CLO: ${msg}`);
-    } finally {
-      setUploadLoading(false);
-      event.target.value = "";
+      event.target.value = "";  // Reset file input after upload
     }
   };
 
@@ -138,7 +118,7 @@ export default function CourseFolder() {
       ) : null}
 
       <div style={{ display: "grid", gridTemplateColumns: "1fr 2fr", gap: 24 }}>
-        {/* LEFT */}
+        {/* LEFT SECTION */}
         <div className="card">
           <div className="card-header">
             <h2 className="card-title">Select Course</h2>
@@ -170,15 +150,13 @@ export default function CourseFolder() {
                   marginBottom: 16,
                 }}
               >
-                <h3 style={{ fontWeight: 600, marginBottom: 8 }}>
-                  Course Details
-                </h3>
+                <h3 style={{ fontWeight: 600, marginBottom: 8 }}>Course Details</h3>
                 <p>
                   <strong>Instructor:</strong> {selectedCourseData.instructor}
                 </p>
                 <p>
-                  <strong>Semester:</strong>{" "}
-                  {selectedCourseData.semester} {selectedCourseData.year}
+                  <strong>Semester:</strong> {selectedCourseData.semester}{" "}
+                  {selectedCourseData.year}
                 </p>
                 <p>
                   <strong>Department:</strong> {selectedCourseData.department}
@@ -188,59 +166,68 @@ export default function CourseFolder() {
 
             {selectedCourse && (
               <>
-                {/* Upload Course Folder */}
-                <div className="upload-area">
-                  <input
-                    type="file"
-                    id="course-upload"
-                    accept="*/*"
-                    onChange={handleCourseUpload}
-                    style={{ display: "none" }}
-                    disabled={uploadLoading}
-                  />
-                  <label
-                    htmlFor="course-upload"
-                    style={{ cursor: uploadLoading ? "not-allowed" : "pointer" }}
-                  >
-                    <CloudArrowUpIcon className="upload-icon" />
-                    <div className="upload-text">
-                      {uploadLoading ? "Uploading..." : "Upload Course Folder"}
+                {/* Folder Structure */}
+                <div className="folder-structure">
+                  {["quizzes", "assignments", "midterm", "final"].map((folder) => (
+                    <div className="folder" key={folder}>
+                      <h3>{folder.charAt(0).toUpperCase() + folder.slice(1)}</h3>
+                      <div className="folder-content">
+                        <input
+                          type="file"
+                          id={`${folder}-upload`}
+                          accept="*/*"
+                          onChange={(e) => handleCourseUpload(folder, e)}
+                          style={{ display: "none" }}
+                          disabled={uploadLoading}
+                        />
+                        <label
+                          htmlFor={`${folder}-upload`}
+                          style={{
+                            cursor: uploadLoading ? "not-allowed" : "pointer",
+                          }}
+                        >
+                          <CloudArrowUpIcon className="upload-icon" />
+                          <div className="upload-text">
+                            {uploadLoading ? "Uploading..." : `Upload ${folder.charAt(0).toUpperCase() + folder.slice(1)} Files`}
+                          </div>
+                          <div className="upload-subtext">
+                            Drag & drop files or click to browse
+                          </div>
+                        </label>
+                        <div className="uploaded-files">
+                          {uploads
+                            .filter((u) => u.folder === folder)  // Filter files based on folder
+                            .map((u) => (
+                              <div key={u.id} className="file-card">
+                                <DocumentIcon className="w-5 h-5 text-gray-400" />
+                                <div>
+                                  <div style={{ fontWeight: 500 }}>{u.filename}</div>
+                                  <div style={{ fontSize: 12, color: "#64748b" }}>
+                                    Uploaded on {new Date(u.upload_date).toLocaleDateString()}
+                                  </div>
+                                </div>
+                                <div style={{ display: "flex", alignItems: "center" }}>
+                                  {getStatusIcon(u.validation_status)}
+                                  <span
+                                    className={`status-badge status-${u.validation_status}`}
+                                    style={{ marginLeft: 8 }}
+                                  >
+                                    {u.validation_status}
+                                  </span>
+                                </div>
+                              </div>
+                            ))}
+                        </div>
+                      </div>
                     </div>
-                    <div className="upload-subtext">
-                      Drag & drop files or click to browse (PDF, DOCX, TXT, ZIP)
-                    </div>
-                  </label>
-                </div>
-
-                {/* Upload CLO File */}
-                <div className="upload-area" style={{ marginTop: 12 }}>
-                  <input
-                    type="file"
-                    id="clo-upload"
-                    accept="*/*"
-                    onChange={handleCLOUpload}
-                    style={{ display: "none" }}
-                    disabled={uploadLoading}
-                  />
-                  <label
-                    htmlFor="clo-upload"
-                    style={{ cursor: uploadLoading ? "not-allowed" : "pointer" }}
-                  >
-                    <CloudArrowUpIcon className="upload-icon" />
-                    <div className="upload-text">
-                      {uploadLoading ? "Uploading..." : "Upload CLO File"}
-                    </div>
-                    <div className="upload-subtext">
-                      Upload CLO requirements separately
-                    </div>
-                  </label>
+                  ))}
                 </div>
               </>
             )}
           </div>
         </div>
 
-        {/* RIGHT */}
+        {/* RIGHT SECTION: File Explorer-Style Upload History */}
         <div className="card">
           <div className="card-header">
             <h2 className="card-title">Upload History & Validation</h2>
@@ -274,72 +261,67 @@ export default function CourseFolder() {
                 No uploads found for this course
               </p>
             ) : (
-              <div>
+              <div className="file-explorer">
                 {uploads.map((u) => {
-                  const pct = u?.validation_details?.completeness_percentage ?? 0;
+                  const pct =
+                    u?.validation_details?.completeness_percentage ?? 0;
                   return (
                     <div
                       key={u.id}
+                      className="file-card"
                       style={{
+                        display: "flex",
+                        flexDirection: "row",
+                        justifyContent: "space-between",
+                        padding: 16,
                         border: "1px solid #e2e8f0",
                         borderRadius: 8,
-                        padding: 16,
                         marginBottom: 16,
+                        backgroundColor: "#fff",
                       }}
                     >
                       <div
                         style={{
                           display: "flex",
-                          justifyContent: "space-between",
-                          alignItems: "flex-start",
-                          marginBottom: 12,
+                          alignItems: "center",
                         }}
                       >
-                        <div style={{ display: "flex", alignItems: "center" }}>
-                          <DocumentIcon
-                            className="w-5 h-5 text-gray-400"
-                            style={{ marginRight: 8 }}
-                          />
-                          <div>
-                            <div style={{ fontWeight: 500 }}>{u.filename}</div>
-                            <div
-                              style={{
-                                fontSize: 12,
-                                color: "#64748b",
-                              }}
-                            >
-                              Uploaded on{" "}
-                              {new Date(u.upload_date).toLocaleDateString()}
-                            </div>
+                        <DocumentIcon
+                          className="w-5 h-5 text-gray-400"
+                          style={{ marginRight: 8 }}
+                        />
+                        <div>
+                          <div style={{ fontWeight: 500 }}>{u.filename}</div>
+                          <div style={{ fontSize: 12, color: "#64748b" }}>
+                            Uploaded on {new Date(u.upload_date).toLocaleDateString()}
                           </div>
                         </div>
-                        <div style={{ display: "flex", alignItems: "center" }}>
-                          {getStatusIcon(u.validation_status)}
-                          <span
-                            className={`status-badge status-${u.validation_status}`}
-                            style={{ marginLeft: 8 }}
-                          >
-                            {u.validation_status}
-                          </span>
-                        </div>
+                      </div>
+
+                      <div style={{ display: "flex", alignItems: "center" }}>
+                        {getStatusIcon(u.validation_status)}
+                        <span
+                          className={`status-badge status-${u.validation_status}`}
+                          style={{ marginLeft: 8 }}
+                        >
+                          {u.validation_status}
+                        </span>
                       </div>
 
                       <div
                         style={{
-                          display: "flex",
-                          alignItems: "center",
+                          fontSize: 14,
+                          fontWeight: 500,
                           marginBottom: 8,
                         }}
                       >
-                        <span
-                          style={{ fontSize: 14, fontWeight: 500, marginRight: 8 }}
-                        >
-                          Completeness:
-                        </span>
-                        <span style={{ fontSize: 14 }}>{pct}%</span>
+                        Completeness: {pct}%
                       </div>
 
-                      <div className="progress-bar" style={{ marginBottom: 12 }}>
+                      <div
+                        className="progress-bar"
+                        style={{ marginBottom: 12 }}
+                      >
                         <div
                           className="progress-fill"
                           style={{
@@ -356,13 +338,7 @@ export default function CourseFolder() {
 
                       {!!u?.validation_details?.missing_items?.length && (
                         <div>
-                          <div
-                            style={{
-                              fontSize: 14,
-                              fontWeight: 500,
-                              marginBottom: 8,
-                            }}
-                          >
+                          <div style={{ fontSize: 14, fontWeight: 500 }}>
                             Missing Items:
                           </div>
                           <div style={{ fontSize: 12, color: "#dc2626" }}>

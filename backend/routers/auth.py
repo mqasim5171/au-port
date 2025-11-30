@@ -4,6 +4,10 @@ from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.orm import Session
 from pydantic import BaseModel, model_validator
 from typing import Optional
+# Add imports at the top of backend/routers/auth.py
+from fastapi import status
+from pydantic import BaseModel, Field
+from services.resetpassword import reset_password_by_admin, change_own_password
 
 from core.db import SessionLocal
 from core.security import (
@@ -102,3 +106,45 @@ def get_current_user(
 @router.get("/me", response_model=UserOut)
 def me(current: User = Depends(get_current_user)):
     return current
+# ===================== PASSWORD RESET ROUTES =====================
+
+class AdminResetPasswordIn(BaseModel):
+    identifier: str = Field(..., description="username OR email OR user UUID")
+    new_password: str = Field(..., min_length=8, description="New password (min 8 chars)")
+
+
+@router.post("/admin/reset-password", response_model=UserOut, status_code=status.HTTP_200_OK)
+def admin_reset_password(
+    payload: AdminResetPasswordIn,
+    current: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    # Only admins can use this route
+    if (current.role or "").lower() not in {"admin", "administrator", "superadmin"}:
+        raise HTTPException(status_code=403, detail="Admin privileges required.")
+
+    try:
+        user = reset_password_by_admin(db, payload.identifier, payload.new_password)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    return user
+
+
+class UserChangePasswordIn(BaseModel):
+    old_password: str
+    new_password: str = Field(..., min_length=8, description="New password (min 8 chars)")
+
+
+@router.post("/change-password", status_code=status.HTTP_204_NO_CONTENT)
+def user_change_password(
+    payload: UserChangePasswordIn,
+    current: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    try:
+        change_own_password(db, current, payload.old_password, payload.new_password)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    return
