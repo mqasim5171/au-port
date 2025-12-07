@@ -11,7 +11,7 @@ import {
 } from "@heroicons/react/24/outline";
 import "../App.css";
 
-// ---------- Helper: Extract Error Message ----------
+// ---------- helper to extract error ----------
 const extractErr = (e) => {
   const d = e?.response?.data;
   if (!d) return e?.message || "Request failed";
@@ -22,15 +22,33 @@ const extractErr = (e) => {
   return JSON.stringify(d);
 };
 
+// simple mapping for 4 folders
+const FOLDERS = [
+  { key: "assignments", label: "Assignments" },
+  { key: "quizzes", label: "Quizzes" },
+  { key: "midterm", label: "Mid Term" },
+  { key: "finalterm", label: "Final Term" },
+];
+
+// infer folder from material title if backend doesn't send one
+const inferFolderFromTitle = (title = "") => {
+  const t = title.toLowerCase().trim();
+  if (t.startsWith("assignment")) return "assignments";
+  if (t.startsWith("quiz")) return "quizzes";
+  if (t.startsWith("mid")) return "midterm";
+  if (t.startsWith("final")) return "finalterm";
+  return "assignments"; // default bucket
+};
+
 export default function CourseFolder() {
-  // -------- STATES --------
   const [courses, setCourses] = useState([]);
   const [selectedCourse, setSelectedCourse] = useState("");
+
   const [materials, setMaterials] = useState([]);
   const [loadingMaterials, setLoadingMaterials] = useState(false);
   const [pageErr, setPageErr] = useState("");
 
-  // Add Material Panel
+  // add-material side panel
   const [isPanelOpen, setIsPanelOpen] = useState(false);
   const [materialTitle, setMaterialTitle] = useState("");
   const [materialDescription, setMaterialDescription] = useState("");
@@ -38,10 +56,13 @@ export default function CourseFolder() {
   const [isSaving, setIsSaving] = useState(false);
   const [dragActive, setDragActive] = useState(false);
 
-  // Expand/collapse cards
+  // which folder is open
+  const [activeFolder, setActiveFolder] = useState(null);
+
+  // expanded material (for file list)
   const [expandedIds, setExpandedIds] = useState(new Set());
 
-  // ---------------- LOAD COURSES ----------------
+  // ------------ load courses ------------
   useEffect(() => {
     setPageErr("");
     api
@@ -54,7 +75,7 @@ export default function CourseFolder() {
       });
   }, []);
 
-  // ---------------- LOAD MATERIALS ----------------
+  // ------------ load materials ------------
   const loadMaterials = useCallback(() => {
     if (!selectedCourse) {
       setMaterials([]);
@@ -75,11 +96,13 @@ export default function CourseFolder() {
 
   useEffect(() => {
     loadMaterials();
+    setActiveFolder(null);
+    setExpandedIds(new Set());
   }, [loadMaterials]);
 
   const selectedCourseData = courses.find((c) => c.id === selectedCourse);
 
-  // ---------------- PANEL FUNCTIONS ----------------
+  // ------------ side panel logic ------------
   const resetMaterialForm = () => {
     setMaterialTitle("");
     setMaterialDescription("");
@@ -92,7 +115,13 @@ export default function CourseFolder() {
       alert("Please select a course first.");
       return;
     }
-    resetMaterialForm();
+    // smart default title based on active folder
+    if (activeFolder === "assignments") setMaterialTitle("Assignment ");
+    else if (activeFolder === "quizzes") setMaterialTitle("Quiz ");
+    else if (activeFolder === "midterm") setMaterialTitle("Mid Term ");
+    else if (activeFolder === "finalterm") setMaterialTitle("Final Term ");
+    else setMaterialTitle("");
+
     setIsPanelOpen(true);
   };
 
@@ -129,10 +158,13 @@ export default function CourseFolder() {
     setMaterialFiles((prev) => prev.filter((_, i) => i !== idx));
   };
 
-  // ---------------- SAVE MATERIAL ----------------
   const handleSaveMaterial = async () => {
     if (!materialTitle.trim()) {
       alert("Please enter a material title.");
+      return;
+    }
+    if (!selectedCourse) {
+      alert("Please select a course first.");
       return;
     }
 
@@ -145,6 +177,9 @@ export default function CourseFolder() {
       if (materialDescription.trim())
         fd.append("description", materialDescription.trim());
 
+      // hint for backend, optional – safe even if backend ignores it
+      if (activeFolder) fd.append("folder_hint", activeFolder);
+
       materialFiles.forEach((f) => fd.append("files", f));
 
       await api.post(`/courses/${selectedCourse}/materials`, fd);
@@ -153,8 +188,9 @@ export default function CourseFolder() {
       await loadMaterials();
     } catch (e) {
       const msg = extractErr(e);
-      alert(`Error saving material: ${msg}`);
       setPageErr(msg);
+      alert(`Error saving material: ${msg}`);
+      if (e?.response?.status === 401) window.location.href = "/login";
     } finally {
       setIsSaving(false);
     }
@@ -168,26 +204,29 @@ export default function CourseFolder() {
     });
   };
 
-  // ---------------- GROUP MATERIALS ----------------
-  const groupedMaterials = {
-    quiz: [],
-    assignment: [],
-    mid: [],
-    final: [],
-    other: [],
+  // ------------ group materials into 4 folders (file-level) ------------
+  // Each folder will contain list of files with reference to material.
+  const folderFiles = {
+    assignments: [],
+    quizzes: [],
+    midterm: [],
+    finalterm: [],
   };
 
   materials.forEach((m) => {
-    const t = m.title.toLowerCase().trim();
-
-    if (t.startsWith("quiz")) groupedMaterials.quiz.push(m);
-    else if (t.startsWith("assignment")) groupedMaterials.assignment.push(m);
-    else if (t.startsWith("mid")) groupedMaterials.mid.push(m);
-    else if (t.startsWith("final")) groupedMaterials.final.push(m);
-    else groupedMaterials.other.push(m);
+    const folder =
+      m.folder || m.folder_type || inferFolderFromTitle(m.title || "");
+    (m.files || []).forEach((f) => {
+      folderFiles[folder]?.push({
+        ...f,
+        materialId: m.id,
+        materialTitle: m.title,
+        materialDescription: m.description,
+      });
+    });
   });
 
-  // ---------------- ANALYZE FILE ----------------
+  // ------------ analyze file ------------
   const analyzeFile = async (fileId) => {
     try {
       const res = await api.get(`/analysis/${fileId}`);
@@ -199,106 +238,32 @@ export default function CourseFolder() {
     }
   };
 
-  // ---------------- RENDER MATERIAL SECTION ----------------
-  const MaterialSection = ({ title, items }) => {
-    if (!items.length) return null;
-
-    return (
-      <div className="material-section">
-        <h3 className="material-section-title">{title}</h3>
-
-        {items.map((m) => {
-          const isExpanded = expandedIds.has(m.id);
-          const fileCount = m.files.length;
-
-          return (
-            <div key={m.id} className="material-card">
-              <button
-                className="material-header"
-                onClick={() => toggleExpanded(m.id)}
-              >
-                {isExpanded ? (
-                  <ChevronDownIcon className="w-5 h-5 text-slate-500" />
-                ) : (
-                  <ChevronRightIcon className="w-5 h-5 text-slate-500" />
-                )}
-                <div style={{ marginLeft: 8 }}>
-                  <div className="material-title">{m.title}</div>
-                  {m.description && (
-                    <div className="material-description">{m.description}</div>
-                  )}
-                  <div className="material-meta">
-                    {fileCount} file{fileCount !== 1 ? "s" : ""}
-                  </div>
-                </div>
-              </button>
-
-              {isExpanded && (
-                <div className="material-body">
-                  {m.files.map((f) => (
-                    <div key={f.id} className="material-file-row">
-                      <div style={{ display: "flex", alignItems: "center" }}>
-                        <DocumentIcon className="w-5 h-5 text-slate-400" />
-                        <span style={{ marginLeft: 8 }}>
-                          {f.display_name || f.filename}
-                        </span>
-                      </div>
-
-                      <div style={{ display: "flex", gap: 12 }}>
-                        {f.url && (
-                          <a
-                            href={f.url}
-                            target="_blank"
-                            rel="noreferrer"
-                            className="file-action-link"
-                          >
-                            Open
-                          </a>
-                        )}
-
-                        <button
-                          className="file-action-link"
-                          onClick={() => analyzeFile(f.id)}
-                        >
-                          Analyze
-                        </button>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          );
-        })}
-      </div>
-    );
-  };
-
-  // -----------------------------------------------------------
-  // ----------------------- MAIN UI ----------------------------
-  // -----------------------------------------------------------
+  // ------------ UI RENDER ------------
   return (
     <div className="fade-in">
       <div className="page-header">
         <h1 className="page-title">Course Folder</h1>
         <p className="page-subtitle">
-          Upload quizzes, assignments & course materials — Google Classroom
-          style.
+          Open course, choose one of the four folders, and upload files just
+          like a real file system.
         </p>
       </div>
 
-      {pageErr && <div className="error-message">{pageErr}</div>}
+      {pageErr && (
+        <div className="error-message" style={{ marginBottom: 12 }}>
+          {pageErr}
+        </div>
+      )}
 
       <div
         style={{
           display: "grid",
           gridTemplateColumns: "1.1fr 2fr",
           gap: 24,
+          alignItems: "flex-start",
         }}
       >
-        {/* ===================================================== */}
-        {/* LEFT COLUMN - COURSE SELECTION */}
-        {/* ===================================================== */}
+        {/* LEFT: course selection */}
         <div className="card">
           <div className="card-header">
             <h2 className="card-title">Select Course</h2>
@@ -308,9 +273,11 @@ export default function CourseFolder() {
               value={selectedCourse}
               onChange={(e) => setSelectedCourse(e.target.value)}
               className="form-input"
+              style={{ marginBottom: 16 }}
+              disabled={!courses.length}
             >
               <option value="">
-                {courses.length ? "Choose a course..." : "Loading..."}
+                {courses.length ? "Choose a course..." : "No courses available"}
               </option>
               {courses.map((course) => (
                 <option key={course.id} value={course.id}>
@@ -320,87 +287,274 @@ export default function CourseFolder() {
             </select>
 
             {selectedCourseData && (
-              <div className="course-details-card">
-                <h3>Course Details</h3>
+              <div
+                style={{
+                  background: "#f8fafc",
+                  padding: 16,
+                  borderRadius: 12,
+                  marginBottom: 16,
+                }}
+              >
+                <h3 style={{ fontWeight: 600, marginBottom: 8 }}>
+                  Course Details
+                </h3>
                 <p>
-                  <strong>Instructor:</strong>{" "}
-                  {selectedCourseData.instructor}
+                  <strong>Instructor:</strong> {selectedCourseData.instructor}
                 </p>
                 <p>
                   <strong>Semester:</strong>{" "}
                   {selectedCourseData.semester} {selectedCourseData.year}
                 </p>
                 <p>
-                  <strong>Department:</strong>{" "}
-                  {selectedCourseData.department}
+                  <strong>Department:</strong> {selectedCourseData.department}
                 </p>
               </div>
             )}
-
-            <button
-              className="add-material-btn"
-              onClick={openPanel}
-              disabled={!selectedCourse}
-            >
-              <PlusCircleIcon className="w-5 h-5" />
-              <span>Add Material</span>
-            </button>
           </div>
         </div>
 
-        {/* ===================================================== */}
-        {/* RIGHT COLUMN - MATERIAL DISPLAY */}
-        {/* ===================================================== */}
+        {/* RIGHT: folder view */}
         <div className="card">
           <div className="card-header">
-            <h2 className="card-title">Course Materials</h2>
+            <h2 className="card-title">Course Folders</h2>
           </div>
-
           <div className="card-content">
             {!selectedCourse ? (
-              <p className="empty-message">Select a course to begin.</p>
+              <p
+                style={{
+                  textAlign: "center",
+                  color: "#64748b",
+                  padding: 48,
+                }}
+              >
+                Select a course to view its folders.
+              </p>
             ) : loadingMaterials ? (
-              <p className="empty-message">Loading materials...</p>
+              <p
+                style={{
+                  textAlign: "center",
+                  color: "#64748b",
+                  padding: 48,
+                }}
+              >
+                Loading materials...
+              </p>
             ) : (
               <>
-                <MaterialSection
-                  title="Quizzes"
-                  items={groupedMaterials.quiz}
-                />
-                <MaterialSection
-                  title="Assignments"
-                  items={groupedMaterials.assignment}
-                />
-                <MaterialSection
-                  title="Midterm"
-                  items={groupedMaterials.mid}
-                />
-                <MaterialSection
-                  title="Final"
-                  items={groupedMaterials.final}
-                />
-                <MaterialSection
-                  title="Other Materials"
-                  items={groupedMaterials.other}
-                />
+                {/* folder icons */}
+                <div
+                  style={{
+                    display: "grid",
+                    gridTemplateColumns: "repeat(4, minmax(0, 1fr))",
+                    gap: 16,
+                    marginBottom: 24,
+                  }}
+                >
+                  {FOLDERS.map((f) => {
+                    const isActive = activeFolder === f.key;
+                    return (
+                      <div
+                        key={f.key}
+                        className="folder-tile"
+                        onClick={() => setActiveFolder(f.key)}
+                        onDoubleClick={() => setActiveFolder(f.key)}
+                        style={{
+                          cursor: "pointer",
+                          textAlign: "center",
+                          padding: 12,
+                          borderRadius: 12,
+                          border: isActive
+                            ? "2px solid #2563eb"
+                            : "1px solid #e2e8f0",
+                          background: "#f8fafc",
+                        }}
+                      >
+                        <div
+                          style={{
+                            width: 48,
+                            height: 36,
+                            margin: "0 auto 8px",
+                            borderRadius: 6,
+                            background:
+                              "linear-gradient(180deg,#facc15,#f59e0b)",
+                            position: "relative",
+                          }}
+                        >
+                          <div
+                            style={{
+                              position: "absolute",
+                              left: "15%",
+                              top: "55%",
+                              right: "15%",
+                              height: 10,
+                              borderRadius: 4,
+                              background: "#1d4ed8",
+                            }}
+                          />
+                        </div>
+                        <div
+                          style={{
+                            fontSize: 13,
+                            fontWeight: 500,
+                            color: isActive ? "#1d4ed8" : "#0f172a",
+                          }}
+                        >
+                          {f.label}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+
+                {/* opened folder contents */}
+                {activeFolder ? (
+                  <div>
+                    <div
+                      style={{
+                        display: "flex",
+                        justifyContent: "space-between",
+                        alignItems: "center",
+                        marginBottom: 8,
+                      }}
+                    >
+                      <h3 style={{ fontSize: 16, fontWeight: 600 }}>
+                        {FOLDERS.find((f) => f.key === activeFolder)?.label}{" "}
+                        Folder
+                      </h3>
+
+                      <button
+                        type="button"
+                        className="add-material-btn"
+                        style={{ padding: "6px 12px", fontSize: 13 }}
+                        onClick={openPanel}
+                      >
+                        <PlusCircleIcon className="w-4 h-4" />
+                        <span style={{ marginLeft: 4 }}>Upload File</span>
+                      </button>
+                    </div>
+
+                    <div style={{ borderTop: "1px solid #e2e8f0", paddingTop: 8 }}>
+                      {folderFiles[activeFolder]?.length ? (
+                        folderFiles[activeFolder].map((f) => {
+                          const matId = f.materialId;
+                          const isExpanded = expandedIds.has(matId);
+
+                          return (
+                            <div
+                              key={f.id}
+                              className="material-card"
+                              style={{ marginBottom: 8 }}
+                            >
+                              <button
+                                type="button"
+                                className="material-header"
+                                onClick={() => toggleExpanded(matId)}
+                              >
+                                {isExpanded ? (
+                                  <ChevronDownIcon className="w-5 h-5 text-slate-500" />
+                                ) : (
+                                  <ChevronRightIcon className="w-5 h-5 text-slate-500" />
+                                )}
+                                <div style={{ marginLeft: 8, textAlign: "left" }}>
+                                  <div className="material-title">
+                                    {f.materialTitle}
+                                  </div>
+                                  <div className="material-description">
+                                    {f.materialDescription || "File"}
+                                  </div>
+                                </div>
+                              </button>
+
+                              {isExpanded && (
+                                <div className="material-body">
+                                  <div className="material-file-row">
+                                    <div
+                                      style={{
+                                        display: "flex",
+                                        alignItems: "center",
+                                      }}
+                                    >
+                                      <DocumentIcon className="w-5 h-5 text-slate-400" />
+                                      <span style={{ marginLeft: 8 }}>
+                                        {f.display_name || f.filename}
+                                      </span>
+                                    </div>
+
+                                    <div style={{ display: "flex", gap: 12 }}>
+                                      {f.url && (
+                                        <a
+                                          href={f.url}
+                                          target="_blank"
+                                          rel="noreferrer"
+                                          className="file-action-link"
+                                        >
+                                          Open
+                                        </a>
+                                      )}
+                                      <button
+                                        type="button"
+                                        className="file-action-link"
+                                        onClick={() => analyzeFile(f.id)}
+                                      >
+                                        Analyze
+                                      </button>
+                                    </div>
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })
+                      ) : (
+                        <p
+                          style={{
+                            padding: 24,
+                            textAlign: "center",
+                            color: "#64748b",
+                            fontSize: 14,
+                          }}
+                        >
+                          This folder is empty. Use{" "}
+                          <strong>Upload File</strong> to add materials.
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                ) : (
+                  <p
+                    style={{
+                      textAlign: "center",
+                      color: "#64748b",
+                      fontSize: 14,
+                    }}
+                  >
+                    Double-click a folder icon to open it.
+                  </p>
+                )}
               </>
             )}
           </div>
         </div>
       </div>
 
-      {/* ===================================================== */}
-      {/* ADD MATERIAL SIDE PANEL */}
-      {/* ===================================================== */}
+      {/* ------------ Add Material Side Panel ------------ */}
       {isPanelOpen && (
         <div className="material-panel-backdrop">
           <div className="material-panel">
             <div className="material-panel-header">
               <div>
                 <h2>Add Material</h2>
-                <p>Add a title, optional description, and files.</p>
+                <p>
+                  Upload file(s) for{" "}
+                  {
+                    (FOLDERS.find((f) => f.key === activeFolder) || {})
+                      .label || "this course"
+                  }
+                  .
+                </p>
               </div>
               <button
+                type="button"
                 className="icon-button"
                 onClick={closePanel}
                 disabled={isSaving}
@@ -411,28 +565,33 @@ export default function CourseFolder() {
 
             <div className="material-panel-body">
               <label className="field-label">
-                Material Title <span className="required">*</span>
+                Material Title <span style={{ color: "#ef4444" }}>*</span>
               </label>
               <input
                 type="text"
                 className="form-input"
-                placeholder="e.g., Quiz 1, Assignment 2, Midterm"
+                placeholder="e.g., Assignment 1, Quiz 2"
                 value={materialTitle}
                 onChange={(e) => setMaterialTitle(e.target.value)}
                 disabled={isSaving}
               />
 
-              <label className="field-label">Description</label>
+              <label className="field-label" style={{ marginTop: 16 }}>
+                Description{" "}
+                <span style={{ color: "#94a3b8" }}>(optional)</span>
+              </label>
               <textarea
                 className="form-textarea"
                 rows={3}
-                placeholder="Optional details"
+                placeholder="Add short instructions or notes."
                 value={materialDescription}
                 onChange={(e) => setMaterialDescription(e.target.value)}
                 disabled={isSaving}
               />
 
-              <label className="field-label">Attach Files</label>
+              <label className="field-label" style={{ marginTop: 16 }}>
+                Attach Files
+              </label>
               <div
                 className={`material-dropzone ${
                   dragActive ? "material-dropzone-active" : ""
@@ -442,9 +601,21 @@ export default function CourseFolder() {
                 onDrop={handleDrop}
               >
                 <CloudArrowUpIcon className="w-8 h-8 text-slate-400" />
-                <p>Drag & drop files</p>
+                <p style={{ marginTop: 8, fontWeight: 500 }}>
+                  Drag & drop files here
+                </p>
+                <p
+                  style={{
+                    fontSize: 12,
+                    color: "#64748b",
+                    marginTop: 4,
+                    marginBottom: 8,
+                  }}
+                >
+                  or click the button below to browse
+                </p>
                 <label className="browse-button">
-                  Browse
+                  <span>Browse files</span>
                   <input
                     type="file"
                     multiple
@@ -459,11 +630,17 @@ export default function CourseFolder() {
                 <div className="material-selected-files">
                   {materialFiles.map((f, idx) => (
                     <div key={idx} className="material-selected-file-row">
-                      <DocumentIcon className="w-4 h-4 text-slate-400" />
-                      <span>{f.name}</span>
+                      <div style={{ display: "flex", alignItems: "center" }}>
+                        <DocumentIcon className="w-4 h-4 text-slate-400" />
+                        <span style={{ marginLeft: 6, fontSize: 13 }}>
+                          {f.name}
+                        </span>
+                      </div>
                       <button
+                        type="button"
                         className="file-remove-btn"
                         onClick={() => handleRemoveFile(idx)}
+                        disabled={isSaving}
                       >
                         Remove
                       </button>
@@ -475,6 +652,7 @@ export default function CourseFolder() {
 
             <div className="material-panel-footer">
               <button
+                type="button"
                 className="btn-primary"
                 onClick={handleSaveMaterial}
                 disabled={isSaving}
@@ -482,6 +660,7 @@ export default function CourseFolder() {
                 {isSaving ? "Saving..." : "Save"}
               </button>
               <button
+                type="button"
                 className="btn-ghost"
                 onClick={closePanel}
                 disabled={isSaving}
