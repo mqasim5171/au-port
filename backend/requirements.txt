@@ -40,10 +40,9 @@ python-dotenv>=1.0
 python-jose[cryptography]>=3.3.0
 email-validator>=2.1.0
 
-# Auth + hashing (keep only this passlib line)
 passlib[bcrypt]==1.7.4
 
-# NLP stack (CPU-only torch)
-torch==2.5.1
-transformers==4.46.2
+# --- FIXED NLP STACK FOR MAC ARM & PYTHON 3.13 ---
+torch==2.6.0               # REPLACED 2.5.1 → 2.6.0 (compatible version)
+transformers==4.46.2       # unchanged
 sentence-transformers==2.7.0

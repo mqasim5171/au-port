@@ -62,6 +62,11 @@ export default function CourseFolder() {
   // expanded material (for file list)
   const [expandedIds, setExpandedIds] = useState(new Set());
 
+  // --------- BULK COURSE FOLDER UPLOADS (file-explorer style) ----------
+  const [bulkUploads, setBulkUploads] = useState([]);
+  const [bulkFiles, setBulkFiles] = useState([]);
+  const [bulkUploading, setBulkUploading] = useState(false);
+
   // ------------ load courses ------------
   useEffect(() => {
     setPageErr("");
@@ -94,15 +99,31 @@ export default function CourseFolder() {
       .finally(() => setLoadingMaterials(false));
   }, [selectedCourse]);
 
+  // ------------ load BULK course-folder uploads (from /upload router) ------------
+  const loadBulkUploads = useCallback(() => {
+    if (!selectedCourse) {
+      setBulkUploads([]);
+      return;
+    }
+    api
+      .get(`/upload/${selectedCourse}/list`)
+      .then((res) => setBulkUploads(res.data || []))
+      .catch((e) => {
+        // don't kill the whole page, just log for now
+        console.error("Failed to load course folder uploads:", extractErr(e));
+      });
+  }, [selectedCourse]);
+
   useEffect(() => {
     loadMaterials();
+    loadBulkUploads();
     setActiveFolder(null);
     setExpandedIds(new Set());
-  }, [loadMaterials]);
+  }, [loadMaterials, loadBulkUploads]);
 
   const selectedCourseData = courses.find((c) => c.id === selectedCourse);
 
-  // ------------ side panel logic ------------
+  // ------------ side panel logic (per-material upload) ------------
   const resetMaterialForm = () => {
     setMaterialTitle("");
     setMaterialDescription("");
@@ -226,7 +247,7 @@ export default function CourseFolder() {
     });
   });
 
-  // ------------ analyze file ------------
+  // ------------ analyze file (single material file) ------------
   const analyzeFile = async (fileId) => {
     try {
       const res = await api.get(`/analysis/${fileId}`);
@@ -238,14 +259,52 @@ export default function CourseFolder() {
     }
   };
 
+  // ------------ handlers for BULK course-folder uploads ------------
+  const handleBulkFilesFromInput = (e) => {
+    const files = Array.from(e.target.files || []);
+    setBulkFiles(files);
+  };
+
+  const handleBulkUpload = async (e) => {
+    e.preventDefault();
+    if (!selectedCourse) {
+      alert("Please select a course first.");
+      return;
+    }
+    if (!bulkFiles.length) {
+      alert("Please choose at least one file (ZIP, PDF, DOCX…).");
+      return;
+    }
+
+    setBulkUploading(true);
+    try {
+      const fd = new FormData();
+      // backend /upload/{course_id} expects field name 'files'
+      bulkFiles.forEach((f) => fd.append("files", f));
+
+      await api.post(`/upload/${selectedCourse}`, fd, {
+        headers: { "Content-Type": "multipart/form-data" },
+      });
+
+      setBulkFiles([]);
+      await loadBulkUploads();
+    } catch (e) {
+      const msg = extractErr(e);
+      alert("Error uploading course folder: " + msg);
+      if (e?.response?.status === 401) window.location.href = "/login";
+    } finally {
+      setBulkUploading(false);
+    }
+  };
+
   // ------------ UI RENDER ------------
   return (
     <div className="fade-in">
       <div className="page-header">
         <h1 className="page-title">Course Folder</h1>
         <p className="page-subtitle">
-          Open course, choose one of the four folders, and upload files just
-          like a real file system.
+          Choose a course, open a folder, and manage both individual materials
+          and full course-folder uploads in one place.
         </p>
       </div>
 
@@ -313,7 +372,7 @@ export default function CourseFolder() {
           </div>
         </div>
 
-        {/* RIGHT: folder view */}
+        {/* RIGHT: folder view (per-material files) */}
         <div className="card">
           <div className="card-header">
             <h2 className="card-title">Course Folders</h2>
@@ -433,7 +492,12 @@ export default function CourseFolder() {
                       </button>
                     </div>
 
-                    <div style={{ borderTop: "1px solid #e2e8f0", paddingTop: 8 }}>
+                    <div
+                      style={{
+                        borderTop: "1px solid #e2e8f0",
+                        paddingTop: 8,
+                      }}
+                    >
                       {folderFiles[activeFolder]?.length ? (
                         folderFiles[activeFolder].map((f) => {
                           const matId = f.materialId;
@@ -455,7 +519,12 @@ export default function CourseFolder() {
                                 ) : (
                                   <ChevronRightIcon className="w-5 h-5 text-slate-500" />
                                 )}
-                                <div style={{ marginLeft: 8, textAlign: "left" }}>
+                                <div
+                                  style={{
+                                    marginLeft: 8,
+                                    textAlign: "left",
+                                  }}
+                                >
                                   <div className="material-title">
                                     {f.materialTitle}
                                   </div>
@@ -480,7 +549,12 @@ export default function CourseFolder() {
                                       </span>
                                     </div>
 
-                                    <div style={{ display: "flex", gap: 12 }}>
+                                    <div
+                                      style={{
+                                        display: "flex",
+                                        gap: 12,
+                                      }}
+                                    >
                                       {f.url && (
                                         <a
                                           href={f.url}
@@ -536,6 +610,165 @@ export default function CourseFolder() {
           </div>
         </div>
       </div>
+
+      {/* ---------- BULK COURSE FOLDER UPLOADS SECTION ---------- */}
+      {selectedCourse && (
+        <div className="card" style={{ marginTop: 24 }}>
+          <div className="card-header">
+            <h2 className="card-title">Course Folder Uploads (Bulk)</h2>
+            <p className="card-subtitle">
+              Upload full course folders (ZIP / PDF / DOCX) for automatic
+              validation and CLO completeness checks.
+            </p>
+          </div>
+          <div className="card-content">
+            <form
+              onSubmit={handleBulkUpload}
+              style={{
+                display: "flex",
+                flexWrap: "wrap",
+                gap: 12,
+                alignItems: "center",
+                marginBottom: 16,
+              }}
+            >
+              <input
+                type="file"
+                multiple
+                onChange={handleBulkFilesFromInput}
+                disabled={bulkUploading}
+              />
+              <button
+                type="submit"
+                className="btn-primary"
+                disabled={bulkUploading || !bulkFiles.length}
+              >
+                {bulkUploading ? "Uploading..." : "Upload Course Folder(s)"}
+              </button>
+              {bulkFiles.length > 0 && !bulkUploading && (
+                <span
+                  style={{
+                    fontSize: 12,
+                    color: "#64748b",
+                  }}
+                >
+                  {bulkFiles.length} file(s) selected
+                </span>
+              )}
+            </form>
+
+            <div style={{ marginTop: 8 }}>
+              <h3
+                style={{
+                  fontWeight: 600,
+                  fontSize: 14,
+                  marginBottom: 8,
+                }}
+              >
+                Previous uploads
+              </h3>
+
+              {!bulkUploads.length ? (
+                <p
+                  style={{
+                    color: "#64748b",
+                    fontSize: 14,
+                  }}
+                >
+                  No course folders uploaded yet for this course.
+                </p>
+              ) : (
+                <div className="upload-list">
+                  {bulkUploads.map((u) => {
+                    const pct =
+                      u.validation_details?.completeness_percentage ?? null;
+                    const status = u.validation_status || "unknown";
+                    let statusColor = "#64748b";
+                    if (status === "complete") statusColor = "#16a34a";
+                    else if (status === "incomplete") statusColor = "#eab308";
+                    else if (status === "invalid") statusColor = "#ef4444";
+
+                    return (
+                      <div
+                        key={u.id}
+                        className="upload-list-item"
+                        style={{
+                          display: "flex",
+                          justifyContent: "space-between",
+                          alignItems: "center",
+                          padding: "8px 0",
+                          borderBottom: "1px solid #e2e8f0",
+                        }}
+                      >
+                        <div
+                          style={{
+                            display: "flex",
+                            alignItems: "center",
+                            gap: 8,
+                          }}
+                        >
+                          <DocumentIcon className="w-4 h-4 text-slate-400" />
+                          <div>
+                            <div
+                              style={{
+                                fontSize: 13,
+                                fontWeight: 500,
+                              }}
+                            >
+                              {u.filename}
+                            </div>
+                            <div
+                              style={{
+                                fontSize: 11,
+                                color: "#64748b",
+                              }}
+                            >
+                              {u.upload_date
+                                ? new Date(u.upload_date).toLocaleString()
+                                : ""}
+                            </div>
+                          </div>
+                        </div>
+                        <div
+                          style={{
+                            display: "flex",
+                            flexDirection: "column",
+                            alignItems: "flex-end",
+                            gap: 4,
+                          }}
+                        >
+                          <span
+                            style={{
+                              fontSize: 11,
+                              padding: "2px 8px",
+                              borderRadius: 999,
+                              border: `1px solid ${statusColor}`,
+                              color: statusColor,
+                              textTransform: "capitalize",
+                            }}
+                          >
+                            {status}
+                          </span>
+                          {pct !== null && (
+                            <span
+                              style={{
+                                fontSize: 11,
+                                color: "#64748b",
+                              }}
+                            >
+                              Completeness: {pct}%
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ------------ Add Material Side Panel ------------ */}
       {isPanelOpen && (

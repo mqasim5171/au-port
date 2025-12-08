@@ -1,25 +1,27 @@
 // src/api.js
 import axios from "axios";
 
-// Prefer Vite's env var if available, else CRA's, else default:
+// CRA does NOT support import.meta.env, so only use REACT_APP_ vars
 const API_BASE =
-  (typeof import.meta !== "undefined" && import.meta.env?.VITE_API_URL) ||
   process.env.REACT_APP_API_URL ||
   "http://127.0.0.1:8000";
 
 const api = axios.create({
-  baseURL: API_BASE,     // origin only; don't append '/auth' here
-  withCredentials: false // using bearer tokens, not cookies
+  baseURL: API_BASE,
+  withCredentials: false,
 });
 
-// Attach token if present; also log the final URL for debugging
+// Attach token automatically on each request
 api.interceptors.request.use((config) => {
-  const t = localStorage.getItem("token");
-  if (t) config.headers.Authorization = `Bearer ${t}`;
-  if (process.env.NODE_ENV !== "production") {
-    // eslint-disable-next-line no-console
-    console.log("API REQUEST ->", (config.baseURL || "") + (config.url || ""));
+  const token = localStorage.getItem("token");
+  if (token) {
+    config.headers.Authorization = `Bearer ${token}`;
   }
+
+  if (process.env.NODE_ENV !== "production") {
+    console.log("API REQUEST ->", `${config.baseURL}${config.url}`);
+  }
+
   return config;
 });
 

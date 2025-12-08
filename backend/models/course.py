@@ -1,7 +1,7 @@
 # backend/models/course.py
 import uuid
 from datetime import datetime, timezone
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy import String, Text, DateTime
 from core.base import Base
 
@@ -18,8 +18,18 @@ class Course(Base):
     year: Mapped[str] = mapped_column(String(16))
     instructor: Mapped[str] = mapped_column(String(255))
     department: Mapped[str] = mapped_column(String(255))
-    # store JSON as text (optional/nullable)
+
+    # Optional JSON string (CLOs)
     clos: Mapped[str | None] = mapped_column(Text, nullable=True)
+
     created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+    )
+
+    # NEW — connect course → materials (Assignments, Quizzes, Midterm, Finalterm)
+    materials: Mapped[list["CourseMaterial"]] = relationship(
+        "CourseMaterial",
+        back_populates="course",
+        cascade="all, delete-orphan"
     )
