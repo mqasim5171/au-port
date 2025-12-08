@@ -9,7 +9,7 @@ def gen_id() -> str:
     return str(uuid.uuid4())
 
 
-class CourseMaterial(Base):
+class CourseMaterial(Base): 
     __tablename__ = "course_materials"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=gen_id)
