@@ -1,9 +1,4 @@
-"""
-Lightweight parser used by the adapter.
-- Parses PDF/DOCX into text
-- For ZIP: we don't parse here (router expands zip and calls adapter per member)
-Return shape (dict) may include: text, pages
-"""
+"""Module for parsing uploaded document files (PDF, DOCX)."""
 import io
 import os
 from typing import Dict, Any, Optional, Tuple, List
