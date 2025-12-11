@@ -5,7 +5,7 @@ from core.base import Base
 
 # import all models so they register on Base.metadata
 # add your modules here
-from models import user, course, file_upload, feedback  # noqa
+from models import user, course, file_upload, feedback ,course_execution  # noqa
 
 _initialized = False
 

@@ -8,7 +8,8 @@ import {
   ChatBubbleLeftRightIcon,
   LightBulbIcon,
   DocumentTextIcon,
-  ArrowRightOnRectangleIcon
+  ArrowRightOnRectangleIcon,
+  ChartBarIcon,          // ✅ NEW: icon for Execution Monitor
 } from '@heroicons/react/24/outline';
 import api from '../api';
 import '../App.css';
@@ -43,6 +44,8 @@ const Layout = ({ user: userProp, onLogout }) => {
     { name: 'Students Feedback', href: '/student-feedback', icon: ChatBubbleLeftRightIcon },
     { name: 'Suggestions', href: '/suggestions', icon: LightBulbIcon },
     { name: 'Reports', href: '/reports', icon: DocumentTextIcon },
+    // ✅ NEW: Course Execution Monitor link
+    { name: 'Execution Monitor', href: '/execution', icon: ChartBarIcon },
   ];
 
   // Active if current path starts with the item path (so nested routes highlight too)

@@ -5,7 +5,7 @@ import os
 
 from routers import (
     auth, users, courses, uploads, feedback, quality, health, dashboard,
-    clo_alignment, course_clo, student_feedback
+    clo_alignment, course_clo, student_feedback ,course_execution
 )
 from core.schema_guard import ensure_all_tables_once
 
@@ -46,6 +46,7 @@ app.include_router(clo_alignment.router)
 app.include_router(health.router)
 app.include_router(dashboard.router)
 app.include_router(student_feedback.router)
+app.include_router(course_execution.router)
 
 @app.on_event("startup")
 def _startup_schema():

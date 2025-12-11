@@ -9,7 +9,8 @@ import StudentFeedback from "./pages/StudentFeedback";
 import Suggestions from "./pages/Suggestions";
 import Reports from "./pages/Reports";
 import api from "./api";
-
+ 
+import CourseExecutionMonitor from "./pages/CourseExecutionMonitor";
 function App() {
   const [user, setUser] = useState(null);
   const [bootstrapped, setBootstrapped] = useState(false);
@@ -73,6 +74,7 @@ function App() {
               <Route path="/student-feedback" element={<StudentFeedback />} />
               <Route path="/suggestions" element={<Suggestions />} />
               <Route path="/reports" element={<Reports />} />
+              <Route path="/execution" element={<CourseExecutionMonitor />} />
               {/* convenience: hit "/" goes to dashboard when logged in */}
               <Route path="/" element={<Navigate to="/dashboard" replace />} />
             </Route>
