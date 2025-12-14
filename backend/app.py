@@ -28,10 +28,8 @@ from routers import (
 # ✅ Create app BEFORE using app.include_router(...)
 app = FastAPI(title="Air QA Backend")
 
-# --- CORS CONFIG ------------------------------------------------------------
-# NOTE: With allow_credentials=True you must NOT use "*" for origins.
-# We read your Netlify origin from FRONTEND_URL and also allow local dev.
-FRONTEND_URL = os.getenv("FRONTEND_URL", "").strip()  # e.g. https://air-qa.netlify.app
+# ---------------- CORS ----------------
+FRONTEND_URL = os.getenv("FRONTEND_URL", "").strip()
 
 ALLOWED_ORIGINS = [
     "http://localhost:3000",
@@ -44,15 +42,14 @@ if FRONTEND_URL:
 app.add_middleware(
     CORSMiddleware,
     allow_origins=ALLOWED_ORIGINS,
-    # If you also want to allow Netlify preview URLs, keep this regex:
     allow_origin_regex=r"https://.*\.netlify\.app",
-    allow_credentials=True,           # matches axios withCredentials: true
+    allow_credentials=True,
     allow_methods=["*"],
-    allow_headers=["*"],              # includes Authorization header
+    allow_headers=["*"],
 )
-# ---------------------------------------------------------------------------
+# -------------------------------------
 
-# Routers
+# ✅ INCLUDE ROUTERS (AFTER app is created)
 app.include_router(auth.router)
 app.include_router(users.router)
 app.include_router(courses.router)
@@ -64,6 +61,7 @@ app.include_router(clo_alignment.router)
 app.include_router(health.router)
 app.include_router(dashboard.router)
 app.include_router(student_feedback.router)
+
 app.include_router(course_execution.router)      # ✅ now matches import
 app.include_router(assessment_router.router)     # ✅ new
 app.include_router(student_router.router)        # ✅ new
@@ -71,6 +69,7 @@ app.include_router(grading_audit_router.router)  # ✅ new
 app.include_router(suggestions.router)           # ✅ FIXED: now app exists
 
 
+# ---------------- Startup ----------------
 @app.on_event("startup")
 def _startup_schema():
     ensure_all_tables_once()
