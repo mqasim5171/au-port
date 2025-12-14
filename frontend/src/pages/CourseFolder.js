@@ -41,8 +41,24 @@ const inferFolderFromTitle = (title = "") => {
   return "assignments"; // default bucket
 };
 
-export default function CourseFolder() {
-  const navigate = useNavigate(); 
+// ✅ accept user prop
+export default function CourseFolder({ user }) {
+  const navigate = useNavigate();
+
+  // ✅ role flags (normalized)
+  const role = (user?.role || "").toString().toLowerCase().replace(/[_-]/g, "");
+  const isAdmin = ["admin", "administrator", "superadmin"].includes(role);
+  const isHod = ["hod"].includes(role);
+  const isCourseLead = ["courselead"].includes(role);
+  const isFaculty = ["faculty", "teacher"].includes(role);
+
+  // ✅ permissions for this page
+  // Materials uploads: faculty/courselead/hod/admin
+  const canUploadMaterials = isAdmin || isHod || isCourseLead || isFaculty;
+
+  // Bulk uploads: typically higher roles (you can allow faculty too if you want)
+  const canBulkUpload = isAdmin || isHod || isCourseLead;
+
   const [courses, setCourses] = useState([]);
   const [selectedCourse, setSelectedCourse] = useState("");
 
@@ -73,7 +89,7 @@ export default function CourseFolder() {
   useEffect(() => {
     setPageErr("");
     api
-      .get("/courses")
+      .get("/courses/my")
       .then((res) => setCourses(res.data || []))
       .catch((e) => {
         const msg = extractErr(e);
@@ -111,7 +127,6 @@ export default function CourseFolder() {
       .get(`/upload/${selectedCourse}/list`)
       .then((res) => setBulkUploads(res.data || []))
       .catch((e) => {
-        // don't kill the whole page, just log for now
         console.error("Failed to load course folder uploads:", extractErr(e));
       });
   }, [selectedCourse]);
@@ -138,6 +153,13 @@ export default function CourseFolder() {
       alert("Please select a course first.");
       return;
     }
+
+    // ✅ role gate
+    if (!canUploadMaterials) {
+      alert("You are not allowed to upload materials for this course.");
+      return;
+    }
+
     // smart default title based on active folder
     if (activeFolder === "assignments") setMaterialTitle("Assignment ");
     else if (activeFolder === "quizzes") setMaterialTitle("Quiz ");
@@ -191,6 +213,12 @@ export default function CourseFolder() {
       return;
     }
 
+    // ✅ role gate (frontend)
+    if (!canUploadMaterials) {
+      alert("You are not allowed to upload materials for this course.");
+      return;
+    }
+
     setIsSaving(true);
     setPageErr("");
 
@@ -200,7 +228,6 @@ export default function CourseFolder() {
       if (materialDescription.trim())
         fd.append("description", materialDescription.trim());
 
-      // hint for backend, optional – safe even if backend ignores it
       if (activeFolder) fd.append("folder_hint", activeFolder);
 
       materialFiles.forEach((f) => fd.append("files", f));
@@ -228,7 +255,6 @@ export default function CourseFolder() {
   };
 
   // ------------ group materials into 4 folders (file-level) ------------
-  // Each folder will contain list of files with reference to material.
   const folderFiles = {
     assignments: [],
     quizzes: [],
@@ -253,9 +279,7 @@ export default function CourseFolder() {
   const analyzeFile = async (fileId) => {
     try {
       const res = await api.get(`/analysis/${fileId}`);
-      alert(
-        `CLO Alignment: ${res.data.clo}%\nPLO Alignment: ${res.data.plo}%`
-      );
+      alert(`CLO Alignment: ${res.data.clo}%\nPLO Alignment: ${res.data.plo}%`);
     } catch (e) {
       alert("Analysis failed: " + extractErr(e));
     }
@@ -273,6 +297,13 @@ export default function CourseFolder() {
       alert("Please select a course first.");
       return;
     }
+
+    // ✅ role gate (frontend)
+    if (!canBulkUpload) {
+      alert("Only Course Lead / HOD / Admin can upload full course folders.");
+      return;
+    }
+
     if (!bulkFiles.length) {
       alert("Please choose at least one file (ZIP, PDF, DOCX…).");
       return;
@@ -281,7 +312,6 @@ export default function CourseFolder() {
     setBulkUploading(true);
     try {
       const fd = new FormData();
-      // backend /upload/{course_id} expects field name 'files'
       bulkFiles.forEach((f) => fd.append("files", f));
 
       await api.post(`/upload/${selectedCourse}`, fd, {
@@ -315,6 +345,14 @@ export default function CourseFolder() {
           {pageErr}
         </div>
       )}
+
+      {/* ✅ Optional: small role badge */}
+      <div style={{ marginBottom: 12, color: "#64748b", fontSize: 13 }}>
+        Logged in as: <strong>{user?.full_name || user?.username}</strong>{" "}
+        <span style={{ marginLeft: 8 }}>
+          Role: <strong>{user?.role || "unknown"}</strong>
+        </span>
+      </div>
 
       <div
         style={{
@@ -370,13 +408,13 @@ export default function CourseFolder() {
                   <strong>Department:</strong> {selectedCourseData.department}
                 </p>
                 <button
-      type="button"
-      className="btn-primary"
-      style={{ marginTop: 12, width: "100%" }}
-      onClick={() => navigate(`/courses/${selectedCourse}/assessments`)}
-    >
-      Open Assessments
-    </button>
+                  type="button"
+                  className="btn-primary"
+                  style={{ marginTop: 12, width: "100%" }}
+                  onClick={() => navigate(`/courses/${selectedCourse}/assessments`)}
+                >
+                  Open Assessments
+                </button>
               </div>
             )}
           </div>
@@ -389,23 +427,11 @@ export default function CourseFolder() {
           </div>
           <div className="card-content">
             {!selectedCourse ? (
-              <p
-                style={{
-                  textAlign: "center",
-                  color: "#64748b",
-                  padding: 48,
-                }}
-              >
+              <p style={{ textAlign: "center", color: "#64748b", padding: 48 }}>
                 Select a course to view its folders.
               </p>
             ) : loadingMaterials ? (
-              <p
-                style={{
-                  textAlign: "center",
-                  color: "#64748b",
-                  padding: 48,
-                }}
-              >
+              <p style={{ textAlign: "center", color: "#64748b", padding: 48 }}>
                 Loading materials...
               </p>
             ) : (
@@ -491,23 +517,47 @@ export default function CourseFolder() {
                         Folder
                       </h3>
 
+                      {/* ✅ Upload button visible but disabled if role not allowed */}
                       <button
                         type="button"
                         className="add-material-btn"
-                        style={{ padding: "6px 12px", fontSize: 13 }}
+                        style={{
+                          padding: "6px 12px",
+                          fontSize: 13,
+                          opacity: canUploadMaterials ? 1 : 0.55,
+                          cursor: canUploadMaterials ? "pointer" : "not-allowed",
+                        }}
                         onClick={openPanel}
+                        disabled={!canUploadMaterials}
+                        title={
+                          canUploadMaterials
+                            ? "Upload new material"
+                            : "You don't have permission to upload materials"
+                        }
                       >
                         <PlusCircleIcon className="w-4 h-4" />
                         <span style={{ marginLeft: 4 }}>Upload File</span>
                       </button>
                     </div>
 
-                    <div
-                      style={{
-                        borderTop: "1px solid #e2e8f0",
-                        paddingTop: 8,
-                      }}
-                    >
+                    {!canUploadMaterials && (
+                      <div
+                        style={{
+                          background: "#fff7ed",
+                          border: "1px solid #fed7aa",
+                          color: "#9a3412",
+                          padding: "10px 12px",
+                          borderRadius: 10,
+                          marginBottom: 10,
+                          fontSize: 13,
+                        }}
+                      >
+                        Upload is disabled for your role. You can view/download
+                        files only.
+                      </div>
+                    )}
+
+                    <div style={{ borderTop: "1px solid #e2e8f0", paddingTop: 8 }}>
                       {folderFiles[activeFolder]?.length ? (
                         folderFiles[activeFolder].map((f) => {
                           const matId = f.materialId;
@@ -529,12 +579,7 @@ export default function CourseFolder() {
                                 ) : (
                                   <ChevronRightIcon className="w-5 h-5 text-slate-500" />
                                 )}
-                                <div
-                                  style={{
-                                    marginLeft: 8,
-                                    textAlign: "left",
-                                  }}
-                                >
+                                <div style={{ marginLeft: 8, textAlign: "left" }}>
                                   <div className="material-title">
                                     {f.materialTitle}
                                   </div>
@@ -547,24 +592,14 @@ export default function CourseFolder() {
                               {isExpanded && (
                                 <div className="material-body">
                                   <div className="material-file-row">
-                                    <div
-                                      style={{
-                                        display: "flex",
-                                        alignItems: "center",
-                                      }}
-                                    >
+                                    <div style={{ display: "flex", alignItems: "center" }}>
                                       <DocumentIcon className="w-5 h-5 text-slate-400" />
                                       <span style={{ marginLeft: 8 }}>
                                         {f.display_name || f.filename}
                                       </span>
                                     </div>
 
-                                    <div
-                                      style={{
-                                        display: "flex",
-                                        gap: 12,
-                                      }}
-                                    >
+                                    <div style={{ display: "flex", gap: 12 }}>
                                       {f.url && (
                                         <a
                                           href={f.url}
@@ -598,20 +633,13 @@ export default function CourseFolder() {
                             fontSize: 14,
                           }}
                         >
-                          This folder is empty. Use{" "}
-                          <strong>Upload File</strong> to add materials.
+                          This folder is empty.
                         </p>
                       )}
                     </div>
                   </div>
                 ) : (
-                  <p
-                    style={{
-                      textAlign: "center",
-                      color: "#64748b",
-                      fontSize: 14,
-                    }}
-                  >
+                  <p style={{ textAlign: "center", color: "#64748b", fontSize: 14 }}>
                     Double-click a folder icon to open it.
                   </p>
                 )}
@@ -627,11 +655,28 @@ export default function CourseFolder() {
           <div className="card-header">
             <h2 className="card-title">Course Folder Uploads (Bulk)</h2>
             <p className="card-subtitle">
-              Upload full course folders (ZIP / PDF / DOCX) for automatic
-              validation and CLO completeness checks.
+              Upload full course folders (ZIP / PDF / DOCX) for automatic validation.
             </p>
           </div>
+
           <div className="card-content">
+            {/* ✅ bulk upload blocked for faculty */}
+            {!canBulkUpload && (
+              <div
+                style={{
+                  background: "#f1f5f9",
+                  border: "1px solid #e2e8f0",
+                  padding: "10px 12px",
+                  borderRadius: 10,
+                  color: "#334155",
+                  fontSize: 13,
+                  marginBottom: 12,
+                }}
+              >
+                Bulk upload is restricted to <strong>Course Lead / HOD / Admin</strong>.
+              </div>
+            )}
+
             <form
               onSubmit={handleBulkUpload}
               style={{
@@ -640,58 +685,42 @@ export default function CourseFolder() {
                 gap: 12,
                 alignItems: "center",
                 marginBottom: 16,
+                opacity: canBulkUpload ? 1 : 0.55,
               }}
             >
               <input
                 type="file"
                 multiple
                 onChange={handleBulkFilesFromInput}
-                disabled={bulkUploading}
+                disabled={bulkUploading || !canBulkUpload}
               />
               <button
                 type="submit"
                 className="btn-primary"
-                disabled={bulkUploading || !bulkFiles.length}
+                disabled={bulkUploading || !bulkFiles.length || !canBulkUpload}
               >
                 {bulkUploading ? "Uploading..." : "Upload Course Folder(s)"}
               </button>
               {bulkFiles.length > 0 && !bulkUploading && (
-                <span
-                  style={{
-                    fontSize: 12,
-                    color: "#64748b",
-                  }}
-                >
+                <span style={{ fontSize: 12, color: "#64748b" }}>
                   {bulkFiles.length} file(s) selected
                 </span>
               )}
             </form>
 
             <div style={{ marginTop: 8 }}>
-              <h3
-                style={{
-                  fontWeight: 600,
-                  fontSize: 14,
-                  marginBottom: 8,
-                }}
-              >
+              <h3 style={{ fontWeight: 600, fontSize: 14, marginBottom: 8 }}>
                 Previous uploads
               </h3>
 
               {!bulkUploads.length ? (
-                <p
-                  style={{
-                    color: "#64748b",
-                    fontSize: 14,
-                  }}
-                >
+                <p style={{ color: "#64748b", fontSize: 14 }}>
                   No course folders uploaded yet for this course.
                 </p>
               ) : (
                 <div className="upload-list">
                   {bulkUploads.map((u) => {
-                    const pct =
-                      u.validation_details?.completeness_percentage ?? null;
+                    const pct = u.validation_details?.completeness_percentage ?? null;
                     const status = u.validation_status || "unknown";
                     let statusColor = "#64748b";
                     if (status === "complete") statusColor = "#16a34a";
@@ -710,43 +739,18 @@ export default function CourseFolder() {
                           borderBottom: "1px solid #e2e8f0",
                         }}
                       >
-                        <div
-                          style={{
-                            display: "flex",
-                            alignItems: "center",
-                            gap: 8,
-                          }}
-                        >
+                        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                           <DocumentIcon className="w-4 h-4 text-slate-400" />
                           <div>
-                            <div
-                              style={{
-                                fontSize: 13,
-                                fontWeight: 500,
-                              }}
-                            >
+                            <div style={{ fontSize: 13, fontWeight: 500 }}>
                               {u.filename}
                             </div>
-                            <div
-                              style={{
-                                fontSize: 11,
-                                color: "#64748b",
-                              }}
-                            >
-                              {u.upload_date
-                                ? new Date(u.upload_date).toLocaleString()
-                                : ""}
+                            <div style={{ fontSize: 11, color: "#64748b" }}>
+                              {u.upload_date ? new Date(u.upload_date).toLocaleString() : ""}
                             </div>
                           </div>
                         </div>
-                        <div
-                          style={{
-                            display: "flex",
-                            flexDirection: "column",
-                            alignItems: "flex-end",
-                            gap: 4,
-                          }}
-                        >
+                        <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 4 }}>
                           <span
                             style={{
                               fontSize: 11,
@@ -760,12 +764,7 @@ export default function CourseFolder() {
                             {status}
                           </span>
                           {pct !== null && (
-                            <span
-                              style={{
-                                fontSize: 11,
-                                color: "#64748b",
-                              }}
-                            >
+                            <span style={{ fontSize: 11, color: "#64748b" }}>
                               Completeness: {pct}%
                             </span>
                           )}
@@ -789,10 +788,8 @@ export default function CourseFolder() {
                 <h2>Add Material</h2>
                 <p>
                   Upload file(s) for{" "}
-                  {
-                    (FOLDERS.find((f) => f.key === activeFolder) || {})
-                      .label || "this course"
-                  }
+                  {(FOLDERS.find((f) => f.key === activeFolder) || {}).label ||
+                    "this course"}
                   .
                 </p>
               </div>
@@ -820,8 +817,7 @@ export default function CourseFolder() {
               />
 
               <label className="field-label" style={{ marginTop: 16 }}>
-                Description{" "}
-                <span style={{ color: "#94a3b8" }}>(optional)</span>
+                Description <span style={{ color: "#94a3b8" }}>(optional)</span>
               </label>
               <textarea
                 className="form-textarea"
@@ -839,22 +835,27 @@ export default function CourseFolder() {
                 className={`material-dropzone ${
                   dragActive ? "material-dropzone-active" : ""
                 }`}
-                onDragOver={handleDragOver}
-                onDragLeave={handleDragLeave}
-                onDrop={handleDrop}
+                onDragOver={(e) => {
+                  e.preventDefault();
+                  setDragActive(true);
+                }}
+                onDragLeave={(e) => {
+                  e.preventDefault();
+                  setDragActive(false);
+                }}
+                onDrop={(e) => {
+                  e.preventDefault();
+                  setDragActive(false);
+                  const files = Array.from(e.dataTransfer.files || []);
+                  if (!files.length) return;
+                  setMaterialFiles((prev) => [...prev, ...files]);
+                }}
               >
                 <CloudArrowUpIcon className="w-8 h-8 text-slate-400" />
                 <p style={{ marginTop: 8, fontWeight: 500 }}>
                   Drag & drop files here
                 </p>
-                <p
-                  style={{
-                    fontSize: 12,
-                    color: "#64748b",
-                    marginTop: 4,
-                    marginBottom: 8,
-                  }}
-                >
+                <p style={{ fontSize: 12, color: "#64748b", marginTop: 4, marginBottom: 8 }}>
                   or click the button below to browse
                 </p>
                 <label className="browse-button">
@@ -862,7 +863,11 @@ export default function CourseFolder() {
                   <input
                     type="file"
                     multiple
-                    onChange={handleFilesFromInput}
+                    onChange={(e) => {
+                      const files = Array.from(e.target.files || []);
+                      if (!files.length) return;
+                      setMaterialFiles((prev) => [...prev, ...files]);
+                    }}
                     style={{ display: "none" }}
                     disabled={isSaving}
                   />
@@ -882,7 +887,9 @@ export default function CourseFolder() {
                       <button
                         type="button"
                         className="file-remove-btn"
-                        onClick={() => handleRemoveFile(idx)}
+                        onClick={() =>
+                          setMaterialFiles((prev) => prev.filter((_, i) => i !== idx))
+                        }
                         disabled={isSaving}
                       >
                         Remove

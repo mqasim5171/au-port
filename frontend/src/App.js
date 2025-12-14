@@ -11,8 +11,8 @@ import Suggestions from "./pages/Suggestions";
 import Reports from "./pages/Reports";
 import CourseExecutionMonitor from "./pages/CourseExecutionMonitor";
 
-import CourseAssessments from "./pages/CourseAssessments";   // ✅ NEW
-import AssessmentDetail from "./pages/AssessmentDetail";     // ✅ Ensure used
+import CourseAssessments from "./pages/CourseAssessments";
+import AssessmentDetail from "./pages/AssessmentDetail";
 
 import api from "./api";
 
@@ -20,7 +20,6 @@ function App() {
   const [user, setUser] = useState(null);
   const [bootstrapped, setBootstrapped] = useState(false);
 
-  // Rehydrate from localStorage and validate token once
   useEffect(() => {
     const token = localStorage.getItem("token");
     if (!token) {
@@ -37,7 +36,6 @@ function App() {
         });
         setUser(me.data);
       } catch {
-        // Bad/expired token: clear and stay logged out
         localStorage.removeItem("token");
         delete api.defaults.headers.common.Authorization;
         setUser(null);
@@ -47,7 +45,6 @@ function App() {
     })();
   }, []);
 
-  // Login handler
   const handleLogin = (me) => setUser(me);
 
   const handleLogout = () => {
@@ -68,12 +65,12 @@ function App() {
           </>
         ) : (
           <>
-            {/* ✅ All logged-in pages live under Layout */}
             <Route element={<Layout user={user} onLogout={handleLogout} />}>
               <Route path="/dashboard" element={<Dashboard />} />
-              <Route path="/course-folder" element={<CourseFolder />} />
 
-              {/* ✅ NEW: Assessments routes */}
+              {/* ✅ PASS USER INTO COURSE FOLDER */}
+              <Route path="/course-folder" element={<CourseFolder user={user} />} />
+
               <Route
                 path="/courses/:courseId/assessments"
                 element={<CourseAssessments />}
@@ -86,7 +83,6 @@ function App() {
               <Route path="/reports" element={<Reports />} />
               <Route path="/execution" element={<CourseExecutionMonitor />} />
 
-              {/* convenience: hit "/" goes to dashboard when logged in */}
               <Route path="/" element={<Navigate to="/dashboard" replace />} />
             </Route>
 

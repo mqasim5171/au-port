@@ -17,15 +17,20 @@ import os
 
 from core.db import SessionLocal
 from .auth import get_current_user
+
 from models.course import Course
 from models.file_upload import FileUpload
-from models.material import CourseMaterial, CourseMaterialFile  # NEW
+from models.material import CourseMaterial, CourseMaterialFile
+from models.course_assignment import CourseAssignment
+
 from schemas.course import CourseCreate, CourseOut
+from schemas.course_assignment import AssignUserToCourseIn
+
+from core.rbac import norm_role, require_course_access, require_roles
 
 router = APIRouter(prefix="/courses", tags=["Courses"])
 
 
-# -------------------- DB DEP --------------------
 def get_db():
     db = SessionLocal()
     try:
@@ -34,8 +39,6 @@ def get_db():
         db.close()
 
 
-# -------------------- LEGACY COURSE FOLDER UPLOAD (ZIP / SINGLE FILE) --------------------
-# This is your old per-course upload (not the 4-folder material system).
 async def _save_course_upload(course_id: str, file: UploadFile, db: Session, current):
     course = db.get(Course, course_id)
     if not course:
@@ -77,14 +80,49 @@ async def _save_course_upload(course_id: str, file: UploadFile, db: Session, cur
     }
 
 
-# -------------------- BASIC COURSE CRUD --------------------
 @router.get("", response_model=list[CourseOut])
 @router.get("/", response_model=list[CourseOut])
-def list_courses(db: Session = Depends(get_db), current=Depends(get_current_user)):
+def list_courses(
+    db: Session = Depends(get_db),
+    current=Depends(get_current_user),  # ✅ callable
+):
     return (
         db.query(Course)
         .order_by(Course.created_at.desc())
         .limit(200)
+        .all()
+    )
+
+
+@router.get("/my", response_model=list[CourseOut])
+def list_my_courses(
+    db: Session = Depends(get_db),
+    current=Depends(get_current_user),  # ✅ callable
+):
+    r = norm_role(current.role)
+
+    if r in {"admin", "hod"}:
+        return (
+            db.query(Course)
+            .order_by(Course.created_at.desc())
+            .limit(200)
+            .all()
+        )
+
+    course_ids = [
+        x.course_id
+        for x in db.query(CourseAssignment)
+        .filter(CourseAssignment.user_id == current.id)
+        .all()
+    ]
+
+    if not course_ids:
+        return []
+
+    return (
+        db.query(Course)
+        .filter(Course.id.in_(course_ids))
+        .order_by(Course.created_at.desc())
         .all()
     )
 
@@ -94,7 +132,7 @@ def list_courses(db: Session = Depends(get_db), current=Depends(get_current_user
 def create_course(
     payload: CourseCreate,
     db: Session = Depends(get_db),
-    current=Depends(get_current_user),
+    current=Depends(require_roles("admin", "hod")),  # ✅ callable dep factory output
 ):
     c = Course(**payload.model_dump())
     db.add(c)
@@ -107,7 +145,7 @@ def create_course(
 def get_course(
     course_id: str,
     db: Session = Depends(get_db),
-    current=Depends(get_current_user),
+    current=Depends(require_course_access),  # ✅ callable
 ):
     c = db.get(Course, course_id)
     if not c:
@@ -115,12 +153,11 @@ def get_course(
     return c
 
 
-# -------------------- LEGACY UPLOAD LIST (FileUpload TABLE) --------------------
 @router.get("/{course_id}/uploads")
 def list_course_uploads(
     course_id: str,
     db: Session = Depends(get_db),
-    current=Depends(get_current_user),
+    current=Depends(require_course_access),  # ✅ callable
 ):
     if not db.get(Course, course_id):
         raise HTTPException(status_code=404, detail="Course not found")
@@ -147,21 +184,16 @@ async def upload_course_file(
     course_id: str,
     file: UploadFile = File(...),
     db: Session = Depends(get_db),
-    current=Depends(get_current_user),
+    current=Depends(require_course_access),  # ✅ callable
 ):
     return await _save_course_upload(course_id, file, db, current)
 
-
-# ======================================================================
-# NEW: 4-FOLDER MATERIAL SYSTEM (Assignments / Quizzes / Mid / Final)
-# ======================================================================
 
 MATERIAL_STORAGE_ROOT = Path("storage") / "materials"
 MATERIAL_STORAGE_ROOT.mkdir(parents=True, exist_ok=True)
 
 
 def _infer_folder_type(title: str) -> str:
-    """Fallback if frontend doesn't send folder_hint."""
     t = (title or "").lower().strip()
     if t.startswith("assignment"):
         return "assignments"
@@ -171,17 +203,15 @@ def _infer_folder_type(title: str) -> str:
         return "midterm"
     if t.startswith("final"):
         return "finalterm"
-    return "assignments"  # default bucket
+    return "assignments"
 
 
-# ---------- GET /courses/{course_id}/materials ----------
 @router.get("/{course_id}/materials")
 def list_course_materials(
     course_id: str,
     db: Session = Depends(get_db),
-    current=Depends(get_current_user),
+    current=Depends(require_course_access),  # ✅ callable
 ):
-    # Ensure course exists
     if not db.get(Course, course_id):
         raise HTTPException(status_code=404, detail="Course not found")
 
@@ -206,7 +236,6 @@ def list_course_materials(
         file_map.setdefault(f.material_id, []).append(f)
 
     def file_to_dict(f: CourseMaterialFile) -> dict:
-        # assuming you serve /storage as static; adjust prefix if needed
         url_path = f.stored_path.replace(os.sep, "/")
         if not url_path.startswith("storage/"):
             url_path = f"storage/{url_path}"
@@ -214,7 +243,7 @@ def list_course_materials(
             "id": f.id,
             "filename": f.filename,
             "display_name": f.filename,
-            "url": f"/{url_path}",  # frontend uses this for <a href>
+            "url": f"/{url_path}",
             "size_bytes": f.size_bytes,
             "content_type": f.content_type,
             "uploaded_at": f.uploaded_at,
@@ -236,11 +265,7 @@ def list_course_materials(
     return out
 
 
-# ---------- POST /courses/{course_id}/materials ----------
-@router.post(
-    "/{course_id}/materials",
-    status_code=status.HTTP_201_CREATED,
-)
+@router.post("/{course_id}/materials", status_code=status.HTTP_201_CREATED)
 async def create_course_material(
     course_id: str,
     title: str = Form(...),
@@ -248,7 +273,7 @@ async def create_course_material(
     folder_hint: Optional[str] = Form(None),
     files: List[UploadFile] = File(...),
     db: Session = Depends(get_db),
-    current=Depends(get_current_user),
+    current=Depends(require_course_access),  # ✅ callable
 ):
     course = db.get(Course, course_id)
     if not course:
@@ -256,7 +281,6 @@ async def create_course_material(
 
     folder_type = folder_hint or _infer_folder_type(title)
 
-    # 1) Create material record
     mat = CourseMaterial(
         id=str(uuid4()),
         course_id=course_id,
@@ -266,23 +290,20 @@ async def create_course_material(
         created_by=current.id,
     )
     db.add(mat)
-    db.flush()  # get mat.id
+    db.flush()
 
-    # 2) Save physical files to disk
     mat_dir = MATERIAL_STORAGE_ROOT / course_id / mat.id
     mat_dir.mkdir(parents=True, exist_ok=True)
 
     for f in files:
-        stored_name = f.filename  # you can prefix with timestamp if you want uniqueness
-        dest = mat_dir / stored_name
-
+        dest = mat_dir / f.filename
         total_bytes = 0
         with dest.open("wb") as out:
             while chunk := await f.read(1024 * 1024):
                 total_bytes += len(chunk)
                 out.write(chunk)
 
-        rel_path = os.path.relpath(dest, ".")  # e.g. "storage/materials/..."
+        rel_path = os.path.relpath(dest, ".")
         mf = CourseMaterialFile(
             material_id=mat.id,
             filename=f.filename,
@@ -296,3 +317,23 @@ async def create_course_material(
     db.refresh(mat)
 
     return {"id": mat.id, "message": "Material created"}
+
+
+@router.post("/{course_id}/assign")
+def assign_user_to_course(
+    course_id: str,
+    payload: AssignUserToCourseIn,
+    db: Session = Depends(get_db),
+    current=Depends(require_roles("admin", "hod")),
+):
+    if not db.get(Course, course_id):
+        raise HTTPException(status_code=404, detail="Course not found")
+
+    row = CourseAssignment(
+        user_id=payload.user_id,
+        course_id=course_id,
+        assignment_role=(payload.assignment_role or "TEACHER").upper(),
+    )
+    db.add(row)
+    db.commit()
+    return {"message": "Assigned", "course_id": course_id, "user_id": payload.user_id}

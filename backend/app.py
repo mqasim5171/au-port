@@ -18,24 +18,23 @@ from routers import (
     clo_alignment,
     course_clo,
     student_feedback,
-    course_execution,      # ✅ correct name
-    assessment_router,     # ✅ new router
-    student_router,        # ✅ new router
-    grading_audit_router,  # ✅ new router
-    suggestions,           # ✅ FIXED: suggestions imported here
+    course_execution,
+    assessment_router,
+    student_router,
+    grading_audit_router,
+    suggestions,
 )
 
-# ✅ Create app BEFORE using app.include_router(...)
 app = FastAPI(title="Air QA Backend")
 
-# --- CORS CONFIG ------------------------------------------------------------
-# NOTE: With allow_credentials=True you must NOT use "*" for origins.
-# We read your Netlify origin from FRONTEND_URL and also allow local dev.
-FRONTEND_URL = os.getenv("FRONTEND_URL", "").strip()  # e.g. https://air-qa.netlify.app
+# -------------------- CORS --------------------
+FRONTEND_URL = os.getenv("FRONTEND_URL", "").strip()  # optional (Netlify)
 
 ALLOWED_ORIGINS = [
     "http://localhost:3000",
     "http://127.0.0.1:3000",
+    "http://localhost:3001",   # ✅ your CRA dev server
+    "http://127.0.0.1:3001",
 ]
 
 if FRONTEND_URL:
@@ -44,15 +43,13 @@ if FRONTEND_URL:
 app.add_middleware(
     CORSMiddleware,
     allow_origins=ALLOWED_ORIGINS,
-    # If you also want to allow Netlify preview URLs, keep this regex:
-    allow_origin_regex=r"https://.*\.netlify\.app",
-    allow_credentials=True,           # matches axios withCredentials: true
+    allow_credentials=False,     # ✅ JWT via Authorization header (no cookies)
     allow_methods=["*"],
-    allow_headers=["*"],              # includes Authorization header
+    allow_headers=["*"],         # ✅ includes Authorization
 )
-# ---------------------------------------------------------------------------
+# ----------------------------------------------
 
-# Routers
+# -------------------- Routers -----------------
 app.include_router(auth.router)
 app.include_router(users.router)
 app.include_router(courses.router)
@@ -64,13 +61,19 @@ app.include_router(clo_alignment.router)
 app.include_router(health.router)
 app.include_router(dashboard.router)
 app.include_router(student_feedback.router)
-app.include_router(course_execution.router)      # ✅ now matches import
-app.include_router(assessment_router.router)     # ✅ new
-app.include_router(student_router.router)        # ✅ new
-app.include_router(grading_audit_router.router)  # ✅ new
-app.include_router(suggestions.router)           # ✅ FIXED: now app exists
+app.include_router(course_execution.router)
+app.include_router(assessment_router.router)
+app.include_router(student_router.router)
+app.include_router(grading_audit_router.router)
+app.include_router(suggestions.router)
+# ----------------------------------------------
 
 
 @app.on_event("startup")
 def _startup_schema():
     ensure_all_tables_once()
+
+
+@app.get("/")
+def root():
+    return {"status": "ok", "service": "air-qa-backend"}

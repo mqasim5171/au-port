@@ -1,12 +1,10 @@
 # backend/routers/auth.py
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.orm import Session
-from pydantic import BaseModel, model_validator
+from pydantic import BaseModel, model_validator, Field
 from typing import Optional
-# Add imports at the top of backend/routers/auth.py
-from fastapi import status
-from pydantic import BaseModel, Field
+
 from services.resetpassword import reset_password_by_admin, change_own_password
 
 from core.db import SessionLocal
@@ -33,19 +31,61 @@ def get_db():
     finally:
         db.close()
 
+
+# ===================== ROLE-BASED EMAIL ENFORCEMENT =====================
+
+ROLE_EMAIL_DOMAIN = {
+    "admin": "admin.com",
+    "hod": "hod.com",
+    "courselead": "courselead.com",
+    "faculty": "faculty.com",
+}
+
+def norm_role(r: Optional[str]) -> str:
+    """
+    Normalizes role names so you can accept variants like:
+    - courselead / course_lead / course-lead -> courselead
+    - teacher -> faculty (your system naming)
+    """
+    x = (r or "").strip().lower()
+    x = x.replace("_", "").replace("-", "")
+    if x == "teacher":
+        x = "faculty"
+    if x == "administrator":
+        x = "admin"
+    return x
+
+def validate_role_email(role: Optional[str], email: str):
+    rk = norm_role(role)
+    expected_domain = ROLE_EMAIL_DOMAIN.get(rk)
+    if expected_domain:
+        if not email.lower().endswith("@" + expected_domain):
+            raise HTTPException(
+                status_code=400,
+                detail=f"Email must be like xyz@{expected_domain} for role {role}",
+            )
+
+
 @router.post("/register", response_model=UserOut, status_code=201)
 def register(payload: UserCreate, db: Session = Depends(get_db)):
+    # 1) Enforce role-based email domain rule
+    validate_role_email(payload.role, payload.email)
+
+    # 2) Prevent duplicates
     existing = db.query(User).filter(
         (User.email == payload.email) | (User.username == payload.username)
     ).first()
     if existing:
         raise HTTPException(status_code=400, detail="Email/username already registered")
 
+    # 3) Normalize role before saving (optional but recommended)
+    saved_role = norm_role(payload.role)
+
     user = User(
         username=payload.username,
         email=payload.email,
         full_name=payload.full_name,
-        role=payload.role,
+        role=saved_role,
         department=payload.department,
         password_hash=hash_password(payload.password),
     )
@@ -53,6 +93,7 @@ def register(payload: UserCreate, db: Session = Depends(get_db)):
     db.commit()
     db.refresh(user)
     return user
+
 
 class LoginJSON(BaseModel):
     username: Optional[str] = None   # username OR email
@@ -63,6 +104,7 @@ class LoginJSON(BaseModel):
         if not (self.username and self.username.strip()):
             raise ValueError("Provide username or email")
         return self
+
 
 @router.post("/login", response_model=TokenOut)
 def login_json(payload: LoginJSON, db: Session = Depends(get_db)):
@@ -89,6 +131,7 @@ def login_json(payload: LoginJSON, db: Session = Depends(get_db)):
         },
     }
 
+
 def get_current_user(
     credentials: HTTPAuthorizationCredentials = Depends(bearer_scheme),
     db: Session = Depends(get_db),
@@ -103,9 +146,12 @@ def get_current_user(
         raise HTTPException(status_code=401, detail="User not found")
     return user
 
+
 @router.get("/me", response_model=UserOut)
 def me(current: User = Depends(get_current_user)):
     return current
+
+
 # ===================== PASSWORD RESET ROUTES =====================
 
 class AdminResetPasswordIn(BaseModel):
@@ -147,4 +193,5 @@ def user_change_password(
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
+    # 204 must return nothing
     return

@@ -4,8 +4,6 @@ from sqlalchemy import inspect
 from core.db import engine
 from core.base import Base
 
-import models.suggestion
-from models import user, course, file_upload, feedback, course_execution  # noqa
 
 _initialized = False
 

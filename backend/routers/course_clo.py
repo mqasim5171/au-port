@@ -1,3 +1,4 @@
+# backend/routers/course_clo.py
 from fastapi import APIRouter, Depends, UploadFile, File, HTTPException, status
 from sqlalchemy.orm import Session
 from pathlib import Path
@@ -5,6 +6,8 @@ from datetime import datetime, timezone
 
 from core.db import SessionLocal
 from .auth import get_current_user
+from core.rbac import require_course_lead_or_higher  # ✅ FIX: import at top
+
 from models.course import Course
 from models.course_clo import CourseCLO
 from schemas.clo import CLOUploadResponse, CLOItem
@@ -13,6 +16,7 @@ from services.clo_parser import extract_clos_from_text
 
 router = APIRouter(prefix="/courses", tags=["Courses (CLOs)"])
 
+
 def get_db():
     db = SessionLocal()
     try:
@@ -20,15 +24,21 @@ def get_db():
     finally:
         db.close()
 
+
 STORAGE_DIR = Path("storage") / "course_clos"
 STORAGE_DIR.mkdir(parents=True, exist_ok=True)
 
-@router.post("/{course_id}/upload-clo", response_model=CLOUploadResponse, status_code=status.HTTP_201_CREATED)
+
+@router.post(
+    "/{course_id}/upload-clo",
+    response_model=CLOUploadResponse,
+    status_code=status.HTTP_201_CREATED,
+)
 async def upload_course_clo(
     course_id: str,
     file: UploadFile = File(...),
     db: Session = Depends(get_db),
-    current = Depends(get_current_user),
+    current=Depends(require_course_lead_or_higher),  # ✅ FIX: do NOT call it
 ):
     course = db.get(Course, course_id)
     if not course:
@@ -61,22 +71,44 @@ async def upload_course_clo(
         upload_date=datetime.now(timezone.utc),
         parsed_text=parsed_text,
         clos_text=clos_text,
-        file_path=str(dest)
+        file_path=str(dest),
     )
     db.add(rec)
     db.commit()
     db.refresh(rec)
 
-    return CLOUploadResponse(id=str(rec.id), filename=rec.filename, upload_date=rec.upload_date)
+    return CLOUploadResponse(
+        id=str(rec.id),
+        filename=rec.filename,
+        upload_date=rec.upload_date,
+    )
+
 
 @router.get("/{course_id}/clos", response_model=list[CLOItem])
-def list_course_clos(course_id: str, db: Session = Depends(get_db), current = Depends(get_current_user)):
+def list_course_clos(
+    course_id: str,
+    db: Session = Depends(get_db),
+    current=Depends(get_current_user),
+):
     if not db.get(Course, course_id):
         raise HTTPException(status_code=404, detail="Course not found")
 
-    rows = db.query(CourseCLO).filter(CourseCLO.course_id == course_id).order_by(CourseCLO.upload_date.desc()).all()
-    out = []
+    rows = (
+        db.query(CourseCLO)
+        .filter(CourseCLO.course_id == course_id)
+        .order_by(CourseCLO.upload_date.desc())
+        .all()
+    )
+
+    out: list[CLOItem] = []
     for r in rows:
         clos = [line.strip() for line in (r.clos_text or "").splitlines() if line.strip()]
-        out.append(CLOItem(id=r.id, filename=r.filename, upload_date=r.upload_date, clos=clos).model_dump())
+        out.append(
+            CLOItem(
+                id=r.id,
+                filename=r.filename,
+                upload_date=r.upload_date,
+                clos=clos,
+            )
+        )
     return out
