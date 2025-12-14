@@ -4,8 +4,21 @@ from fastapi.middleware.cors import CORSMiddleware
 import os
 
 from routers import (
-    auth, users, courses, uploads, feedback, quality, health, dashboard,
-    clo_alignment, course_clo, student_feedback ,course_execution
+    auth,
+    users,
+    courses,
+    uploads,
+    feedback,
+    quality,
+    health,
+    dashboard,
+    clo_alignment,
+    course_clo,
+    student_feedback,
+    course_execution,      # ✅ correct name
+    assessment_router,     # ✅ new router
+    student_router,        # ✅ new router
+    grading_audit_router,  # ✅ new router
 )
 from core.schema_guard import ensure_all_tables_once
 
@@ -46,7 +59,11 @@ app.include_router(clo_alignment.router)
 app.include_router(health.router)
 app.include_router(dashboard.router)
 app.include_router(student_feedback.router)
-app.include_router(course_execution.router)
+app.include_router(course_execution.router)      # ✅ now matches import
+app.include_router(assessment_router.router)     # ✅ new
+app.include_router(student_router.router)        # ✅ new
+app.include_router(grading_audit_router.router)  # ✅ new
+
 
 @app.on_event("startup")
 def _startup_schema():

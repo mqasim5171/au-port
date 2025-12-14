@@ -24,5 +24,37 @@ api.interceptors.request.use((config) => {
 
   return config;
 });
+export const fetchCourseAssessments = (courseId) =>
+  api.get(`/courses/${courseId}/assessments`);
+
+export const createAssessment = (courseId, data) =>
+  api.post(`/courses/${courseId}/assessments`, data);
+
+export const fetchAssessment = (assessmentId) =>
+  api.get(`/assessments/${assessmentId}`);
+
+export const updateAssessment = (assessmentId, data) =>
+  api.put(`/assessments/${assessmentId}`, data);
+
+// Submissions
+export const bulkUploadMarks = (assessmentId, file) => {
+  const formData = new FormData();
+  formData.append("file", file);
+  return api.post(`/assessments/${assessmentId}/submissions/bulk-upload`, formData);
+};
+
+export const uploadSolutionFile = (assessmentId, regNo, file) => {
+  const formData = new FormData();
+  formData.append("reg_no", regNo);
+  formData.append("file", file);
+  return api.post(`/assessments/${assessmentId}/submissions/file`, formData);
+};
+
+// Grading Audit
+export const runGradingAudit = (assessmentId) =>
+  api.post(`/assessments/${assessmentId}/run-grading-audit`);
+
+export const getGradingAudit = (assessmentId) =>
+  api.get(`/assessments/${assessmentId}/grading-audit`);
 
 export default api;
