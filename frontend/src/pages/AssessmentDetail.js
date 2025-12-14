@@ -1,111 +1,82 @@
-// src/pages/AssessmentDetail.js
 import React, { useEffect, useState } from "react";
 import { useParams } from "react-router-dom";
-import {
-  fetchAssessment,
-  getGradingAudit,
-  runGradingAudit,
-} from "../api";
-import UploadMarksModal from "../components/UploadMarksModal";
+import api from "./api";
+
+import UploadMarkModal from "../components/UploadMarkModal";
 import GradingAuditTab from "../components/GradingAuditTab";
 
-export default function AssessmentDetail() {
-  const { assessmentId } = useParams();
+const AssessmentDetail = () => {
+  const { id } = useParams();
   const [assessment, setAssessment] = useState(null);
-  const [auditData, setAuditData] = useState([]);
-  const [activeTab, setActiveTab] = useState("overview");
-  const [showUploadModal, setShowUploadModal] = useState(false);
+  const [submissions, setSubmissions] = useState([]);
+  const [showUpload, setShowUpload] = useState(false);
 
   useEffect(() => {
-    fetchAssessment(assessmentId).then((res) => setAssessment(res.data));
-  }, [assessmentId]);
-
-  useEffect(() => {
-    if (activeTab === "audit") {
-      getGradingAudit(assessmentId).then((res) =>
-        setAuditData(res.data)
-      );
-    }
-  }, [activeTab, assessmentId]);
+    api.get(`/assessments/${id}`).then(res => setAssessment(res.data));
+    api.get(`/assessments/${id}/submissions`).then(res => setSubmissions(res.data));
+  }, [id]);
 
   if (!assessment) return <p>Loading...</p>;
 
-  const handleRunAudit = () => {
-    runGradingAudit(assessmentId).then(() => {
-      getGradingAudit(assessmentId).then((res) => setAuditData(res.data));
-    });
-  };
-
   return (
-    <div className="page-container">
-      <h1>{assessment.title}</h1>
+    <div>
+      <h2>{assessment.title}</h2>
       <p>
-        Type: {assessment.type} • Total Marks: {assessment.total_marks} •
-        Weightage: {assessment.weightage}%
+        {assessment.type} | Total Marks: {assessment.total_marks}
       </p>
 
-      <div className="tabs">
-        <button
-          className={activeTab === "overview" ? "tab active" : "tab"}
-          onClick={() => setActiveTab("overview")}
-        >
-          Overview
-        </button>
-        <button
-          className={activeTab === "submissions" ? "tab active" : "tab"}
-          onClick={() => setActiveTab("submissions")}
-        >
-          Submissions
-        </button>
-        <button
-          className={activeTab === "audit" ? "tab active" : "tab"}
-          onClick={() => setActiveTab("audit")}
-        >
-          Grading Audit
-        </button>
-      </div>
+      {/* -------- Submissions -------- */}
+      <h3>Student Submissions</h3>
 
-      {activeTab === "overview" && (
-        <div className="card">
-          {/* Show CLO list, date, course, maybe link to Course Execution Monitor */}
-          <h3>CLOs</h3>
-          <ul>
-            {(assessment.clos || []).map((c) => (
-              <li key={c.id}>{c.code} – {c.description}</li>
-            ))}
-          </ul>
-        </div>
-      )}
+      <button onClick={() => setShowUpload(true)}>
+        Upload Marks (CSV)
+      </button>
 
-      {activeTab === "submissions" && (
-        <div className="card">
-          <div className="card-header">
-            <h3>Submissions</h3>
-            <button
-              className="btn-primary"
-              onClick={() => setShowUploadModal(true)}
-            >
-              Upload Marks (CSV)
-            </button>
-          </div>
-          {/* TODO: call a backend endpoint to get submissions list with students */}
-          <p>Later: table of students + marks + file links.</p>
+      <table>
+        <thead>
+          <tr>
+            <th>Reg No</th>
+            <th>Marks</th>
+            <th>Solution</th>
+          </tr>
+        </thead>
 
-          {showUploadModal && (
-            <UploadMarksModal
-              assessmentId={assessmentId}
-              onClose={() => setShowUploadModal(false)}
-            />
-          )}
-        </div>
-      )}
+        <tbody>
+          {submissions.map(s => (
+            <tr key={s.id}>
+              <td>{s.reg_no}</td>
+              <td>{s.obtained_marks ?? "-"}</td>
+              <td>
+                {s.file_upload_id ? (
+                  <a href={`/api/uploads/${s.file_upload_id}`} target="_blank" rel="noreferrer">
+                    View
+                  </a>
+                ) : (
+                  "Not uploaded"
+                )}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
 
-      {activeTab === "audit" && (
-        <GradingAuditTab
-          auditData={auditData}
-          onRunAudit={handleRunAudit}
+      {/* -------- Modals / Components -------- */}
+      {showUpload && (
+        <UploadMarkModal
+          assessmentId={id}
+          onClose={() => setShowUpload(false)}
+          onSuccess={() => {
+            setShowUpload(false);
+            api.get(`/assessments/${id}/submissions`)
+              .then(res => setSubmissions(res.data));
+          }}
         />
       )}
+
+      {/* -------- Grading Audit -------- */}
+      <GradingAuditTab assessmentId={id} />
     </div>
   );
-}
+};
+
+export default AssessmentDetail;
