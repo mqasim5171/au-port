@@ -1,8 +1,11 @@
 # models/grading_audit.py
 import uuid
 from datetime import datetime, timezone
-from sqlalchemy.orm import Mapped, mapped_column
+
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy import String, Text, DateTime, ForeignKey
+from sqlalchemy.dialects.postgresql import UUID
+
 from core.base import Base
 
 def gen_id() -> str:
@@ -11,15 +14,25 @@ def gen_id() -> str:
 class GradingAudit(Base):
     __tablename__ = "grading_audits"
 
+    # keep string PK if you want
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=gen_id)
-    assessment_id: Mapped[str] = mapped_column(
-        String(36), ForeignKey("assessments.id"), index=True
+
+    # ✅ MUST match assessments.id (UUID)
+    assessment_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("assessments.id", ondelete="CASCADE"),
+        index=True,
+        nullable=False,
     )
 
-    metric: Mapped[str] = mapped_column(String(50))  # mean, std_dev, outliers, clo_avg
-    value: Mapped[str] = mapped_column(Text)  # store JSON string like {"mean": 14.2}
+    metric: Mapped[str] = mapped_column(String(50), nullable=False)
+    value: Mapped[str] = mapped_column(Text, nullable=False)
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        nullable=False,
     )
+
+    assessment = relationship("Assessment")

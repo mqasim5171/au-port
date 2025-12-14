@@ -1,9 +1,10 @@
 # backend/routers/suggestions.py
+from routers.auth import get_current_user
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from core.db import get_db
-from core.auth import get_current_user
+
 from models.suggestion import Suggestion, SuggestionAction
 from schemas.suggestion import (
     SuggestionCreate,

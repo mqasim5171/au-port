@@ -1,9 +1,10 @@
 # app.py
+import os
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-import os
-from routers import suggestions
-app.include_router(suggestions.router)
+
+from core.schema_guard import ensure_all_tables_once
 
 from routers import (
     auth,
@@ -21,9 +22,10 @@ from routers import (
     assessment_router,     # ✅ new router
     student_router,        # ✅ new router
     grading_audit_router,  # ✅ new router
+    suggestions,           # ✅ FIXED: suggestions imported here
 )
-from core.schema_guard import ensure_all_tables_once
 
+# ✅ Create app BEFORE using app.include_router(...)
 app = FastAPI(title="Air QA Backend")
 
 # --- CORS CONFIG ------------------------------------------------------------
@@ -35,6 +37,7 @@ ALLOWED_ORIGINS = [
     "http://localhost:3000",
     "http://127.0.0.1:3000",
 ]
+
 if FRONTEND_URL:
     ALLOWED_ORIGINS.append(FRONTEND_URL)
 
@@ -65,6 +68,7 @@ app.include_router(course_execution.router)      # ✅ now matches import
 app.include_router(assessment_router.router)     # ✅ new
 app.include_router(student_router.router)        # ✅ new
 app.include_router(grading_audit_router.router)  # ✅ new
+app.include_router(suggestions.router)           # ✅ FIXED: now app exists
 
 
 @app.on_event("startup")
