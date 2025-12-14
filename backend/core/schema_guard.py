@@ -3,6 +3,9 @@ from sqlalchemy import inspect
 from core.db import engine
 from core.base import Base
 
+import models.suggestion
+
+
 # import all models so they register on Base.metadata
 # add your modules here
 from models import user, course, file_upload, feedback ,course_execution  # noqa
