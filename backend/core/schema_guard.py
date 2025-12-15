@@ -2,7 +2,8 @@
 from sqlalchemy.exc import OperationalError
 from sqlalchemy import inspect
 from core.db import engine
-from core.base import Base
+from core.db import Base
+
 
 
 _initialized = False

@@ -6,8 +6,9 @@ from datetime import datetime, timezone, date
 from sqlalchemy import String, Integer, Date, DateTime, Table, Column, ForeignKey
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
+ # ✅ IMPORTANT (this fixes your NameError)
+from core.db import Base
 
-from core.base import Base  # ✅ IMPORTANT (this fixes your NameError)
 
 
 # ✅ Association table MUST be defined before the relationship uses it

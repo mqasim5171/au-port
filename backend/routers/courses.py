@@ -19,7 +19,7 @@ from core.db import SessionLocal
 from .auth import get_current_user
 
 from models.course import Course
-from models.file_upload import FileUpload
+
 from models.material import CourseMaterial, CourseMaterialFile
 from models.course_assignment import CourseAssignment
 

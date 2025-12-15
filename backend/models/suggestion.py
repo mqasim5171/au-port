@@ -4,7 +4,8 @@ from datetime import datetime, timezone
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy import String, Text, DateTime, ForeignKey, Enum, Index
 
-from core.base import Base
+from core.db import Base
+
 
 def gen_id() -> str:
     return str(uuid.uuid4())

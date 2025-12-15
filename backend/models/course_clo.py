@@ -5,8 +5,9 @@ from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
 import uuid
 import datetime
+from core.db import Base
 
-from core.base import Base
+
 
 
 class CourseCLO(Base):

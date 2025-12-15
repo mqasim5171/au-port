@@ -1,7 +1,8 @@
 from datetime import datetime, timezone
 from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy import String, DateTime, ForeignKey, UniqueConstraint
-from core.base import Base
+from core.db import Base
+
 import uuid
 
 def gen_id() -> str:

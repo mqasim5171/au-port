@@ -5,8 +5,8 @@ from typing import Optional
 
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy import String, Integer, Text, DateTime, Boolean, ForeignKey
+from core.db import Base
 
-from core.base import Base
 
 
 def gen_id() -> str:

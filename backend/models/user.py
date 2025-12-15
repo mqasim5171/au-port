@@ -2,7 +2,8 @@ from datetime import datetime, timezone
 from uuid import uuid4
 from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy import String, DateTime
-from core.base import Base
+from core.db import Base
+
 
 class User(Base):
     __tablename__ = "users"

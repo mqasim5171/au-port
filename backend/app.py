@@ -3,7 +3,7 @@ import os
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-
+from core.db import init_db
 from core.schema_guard import ensure_all_tables_once
 
 from routers import (
@@ -26,6 +26,8 @@ from routers import (
 )
 
 app = FastAPI(title="Air QA Backend")
+init_db()
+
 
 # -------------------- CORS --------------------
 FRONTEND_URL = os.getenv("FRONTEND_URL", "").strip()  # optional (Netlify)

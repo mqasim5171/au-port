@@ -2,7 +2,7 @@
 import os
 from pathlib import Path
 from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker, declarative_base  # ✅ add declarative_base
+from sqlalchemy.orm import sessionmaker, declarative_base
 
 # --- Load .env from the backend directory ---
 try:
@@ -32,10 +32,15 @@ engine = create_engine(
 
 print("DB_URL:", DB_URL)
 
-SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False, future=True)
+SessionLocal = sessionmaker(
+    bind=engine,
+    autoflush=False,
+    autocommit=False,
+    future=True
+)
 
-# ✅ add this
 Base = declarative_base()
+
 
 def get_db():
     db = SessionLocal()
@@ -43,3 +48,27 @@ def get_db():
         yield db
     finally:
         db.close()
+
+
+# ✅ ADD THIS FUNCTION (VERY IMPORTANT)
+def init_db():
+    """
+    Import ALL models here so SQLAlchemy knows about them
+    before creating tables.
+    """
+
+    # --- existing models ---
+    import models.user
+    import models.course
+    import models.uploads
+    import models.course_clo
+    import models.assessment
+    import models.student_submission
+    import models.clo_alignment
+
+    # --- NEW workflow models ---
+    import models.assessment_question
+    import models.question_clo
+    # import models.submission_question_score  # uncomment if you added it
+
+    Base.metadata.create_all(bind=engine)

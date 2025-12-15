@@ -13,5 +13,7 @@ class UploadItem(BaseModel):
     version: int = 1
 
 class UploadResponse(BaseModel):
-    files: List[UploadItem]
-    log: List[Dict[str, Any]]
+    id: str
+    file_name: str
+    category: str
+    folder_key: Optional[str]

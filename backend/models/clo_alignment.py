@@ -2,6 +2,7 @@
 from sentence_transformers import SentenceTransformer, util
 from schemas.clo_alignment import CLOAlignmentRequest, CLOAlignmentResponse, CLOPair
 import numpy as np
+from core.db import Base
 
 # Load embeddings model once
 _model = SentenceTransformer("all-MiniLM-L6-v2")

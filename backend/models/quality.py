@@ -3,8 +3,8 @@ from sqlalchemy.orm import Session
 import uuid
 import json
 from datetime import datetime, timezone
+from core.db import Base
 
-from core.base import Base
 from models.assessment import Assessment
 from models.grading_audit import GradingAudit
 
