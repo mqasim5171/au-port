@@ -1,8 +1,9 @@
 # backend/core/rbac.py
-from fastapi import Depends, HTTPException
+from fastapi import Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
 from core.db import SessionLocal
+from routers.auth import get_current_user
 from models.course_assignment import CourseAssignment
 
 
@@ -24,16 +25,10 @@ def norm_role(r: str) -> str:
     return x
 
 
-# ✅ SAFE wrapper: MUST return the actual user, not Depends(...)
-def _get_current_user_safe():
-    from routers.auth import get_current_user  # local import avoids circular import
-    return get_current_user()                  # ✅ call it, return user object
-
-
 def require_roles(*allowed_roles: str):
     allowed = {norm_role(x) for x in allowed_roles}
 
-    def dep(current=Depends(_get_current_user_safe)):
+    def dep(current=Depends(get_current_user)):
         if norm_role(getattr(current, "role", "")) not in allowed:
             raise HTTPException(status_code=403, detail="Not authorized for this action")
         return current
@@ -41,10 +36,9 @@ def require_roles(*allowed_roles: str):
     return dep
 
 
-# ✅ course_id comes from the route automatically
 def require_course_access(
     course_id: str,
-    current=Depends(_get_current_user_safe),   # ✅ NOTE: no () here
+    current=Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     r = norm_role(getattr(current, "role", ""))
@@ -80,7 +74,7 @@ def require_course_access(
 
 def require_course_lead_or_higher(
     course_id: str,
-    current=Depends(_get_current_user_safe),   # ✅ no ()
+    current=Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     r = norm_role(getattr(current, "role", ""))
@@ -88,17 +82,17 @@ def require_course_lead_or_higher(
     if r in {"admin", "hod"}:
         return current
 
-    rows = (
+    ok = (
         db.query(CourseAssignment)
         .filter(
             CourseAssignment.course_id == course_id,
             CourseAssignment.user_id == current.id,
             CourseAssignment.assignment_role == "COURSE_LEAD",
         )
-        .all()
+        .first()
     )
 
-    if not rows:
+    if not ok:
         raise HTTPException(status_code=403, detail="Course lead (or higher) required")
 
     return current
