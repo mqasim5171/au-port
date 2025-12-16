@@ -15,13 +15,14 @@ const Login = ({ onLogin }) => {
   const extractErr = (err) => {
     const status = err?.response?.status;
     const data = err?.response?.data;
-    // FastAPI common shapes: detail (string | list[{msg}]) or message
-    const detailList =
-      Array.isArray(data?.detail) ? data.detail.map((x) => x?.msg).filter(Boolean).join(", ") : null;
+
+    const detailList = Array.isArray(data?.detail)
+      ? data.detail.map((x) => x?.msg).filter(Boolean).join(", ")
+      : null;
 
     return (
       detailList ||
-      data?.detail ||
+      (typeof data?.detail === "string" ? data.detail : null) ||
       data?.message ||
       (status === 401 ? "Invalid username/email or password" : null) ||
       err?.message ||
@@ -29,13 +30,27 @@ const Login = ({ onLogin }) => {
     );
   };
 
+  const normalizeIdentifier = (raw) => {
+    const v = (raw || "").trim();
+    if (!v) return "";
+
+    // If user typed an email -> make it lowercase (emails are case-insensitive)
+    if (v.includes("@")) return v.toLowerCase();
+
+    // Username: keep as-is (or you can do v.toLowerCase() if you want case-insensitive usernames)
+    return v;
+  };
+
   const handleSubmit = async (e) => {
     e.preventDefault();
-    if (submittedRef.current || busy) return; // guard
+
+    // Guard: prevent double submit
+    if (submittedRef.current || busy) return;
+
     setError("");
 
-    const u = (username || "").trim();
-    if (!u || !password) {
+    const identifier = normalizeIdentifier(username);
+    if (!identifier || !password) {
       setError("Please enter username/email and password");
       return;
     }
@@ -44,49 +59,52 @@ const Login = ({ onLogin }) => {
     submittedRef.current = true;
 
     try {
-      // --- STEP 1: Login (authoritative)
+      // --- STEP 1: LOGIN (works with username OR email)
       const { data } = await api.post(
         "/auth/login",
-        { username: u, password },
+        { username: identifier, password }, // ✅ backend expects 'username' field even if it's email
         { headers: { "Content-Type": "application/json" } }
       );
 
       const token = data?.access_token || data?.token;
       if (!token) throw new Error("No token returned by server");
 
-      // Persist token for subsequent calls
+      // Save token
       localStorage.setItem("token", token);
       api.defaults.headers.common.Authorization = `Bearer ${token}`;
 
-      // --- STEP 2: Try to fetch /auth/me (non-fatal)
-      try {
-        const meResp = await api.get("/auth/me", {
-          headers: { Authorization: `Bearer ${token}` },
-        });
-        if (onLogin) {
-          try {
-            onLogin(meResp.data);
-          } catch (onLoginErr) {
-            // Don't block navigation if parent handler throws
-            // eslint-disable-next-line no-console
-            console.warn("onLogin handler error:", onLoginErr);
-          }
+      // --- STEP 2: Prefer user object from login response (your backend returns it)
+      if (data?.user && onLogin) {
+        try {
+          onLogin(data.user);
+        } catch (onLoginErr) {
+          // eslint-disable-next-line no-console
+          console.warn("onLogin handler error (non-fatal):", onLoginErr);
         }
-      } catch (meErr) {
-        // Do NOT show "Login failed" here—login already succeeded.
-        // eslint-disable-next-line no-console
-        console.warn("Non-fatal /auth/me error:", meErr?.response?.status, meErr?.response?.data || meErr?.message);
+      } else {
+        // fallback: fetch /auth/me
+        try {
+          const meResp = await api.get("/auth/me");
+          if (onLogin) onLogin(meResp.data);
+        } catch (meErr) {
+          // eslint-disable-next-line no-console
+          console.warn(
+            "Non-fatal /auth/me error:",
+            meErr?.response?.status,
+            meErr?.response?.data || meErr?.message
+          );
+        }
       }
 
-      // Navigate even if /auth/me failed; token is saved and app can rehydrate on load
+      // Navigate after login
       navigate("/", { replace: true });
     } catch (err) {
-      // Only show error if the LOGIN step failed
       const msg = extractErr(err);
       setError(msg);
       submittedRef.current = false; // allow retry
     } finally {
       setBusy(false);
+      // if login succeeded, keep submittedRef true; if failed we already reset above
     }
   };
 
@@ -104,7 +122,7 @@ const Login = ({ onLogin }) => {
       <div className="login-card">
         <div className="login-header">
           <h1 className="login-title">AIR QA Portal</h1>
-        <p className="login-subtitle">Sign in to continue</p>
+          <p className="login-subtitle">Sign in to continue</p>
         </div>
 
         {error && <div className="error-message">{error}</div>}
@@ -119,9 +137,6 @@ const Login = ({ onLogin }) => {
               onChange={(e) => setUsername(e.target.value)}
               autoComplete="username"
               disabled={busy}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" && !busy) handleSubmit(e);
-              }}
             />
           </div>
 
@@ -135,9 +150,6 @@ const Login = ({ onLogin }) => {
               onChange={(e) => setPassword(e.target.value)}
               autoComplete="current-password"
               disabled={busy}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" && !busy) handleSubmit(e);
-              }}
             />
           </div>
 
