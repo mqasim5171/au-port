@@ -843,3 +843,611 @@ body {
 .btn-ghost:hover {
   background: #f9fafb;
 }
+
+/* =========================================================
+   Course Folder (Scoped Styles) — SAFE (won't break dashboard)
+   Add this block at the END of App.css
+========================================================= */
+
+.course-folder-page {
+  background: transparent; /* keep global bg */
+}
+
+.course-folder-page .tabs-row {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-bottom: 14px;
+}
+
+.course-folder-page .btn-tab {
+  border-radius: 999px;
+  border: 1px solid #e2e8f0;
+  background: #ffffff;
+  padding: 8px 14px;
+  font-size: 13px;
+  font-weight: 700;
+  color: #0f172a;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.course-folder-page .btn-tab:hover:not(:disabled) {
+  background: #f8fafc;
+}
+
+.course-folder-page .btn-tab.active {
+  background: #2563eb;
+  border-color: #2563eb;
+  color: #ffffff;
+}
+
+.course-folder-page .course-folder-grid {
+  display: grid;
+  grid-template-columns: 1.1fr 2fr;
+  gap: 18px;
+  align-items: start;
+}
+
+@media (max-width: 1100px) {
+  .course-folder-page .course-folder-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.course-folder-page .row {
+  display: flex;
+  align-items: center;
+}
+
+.course-folder-page .icon-btn svg {
+  width: 18px !important;
+  height: 18px !important;
+  flex: 0 0 18px !important;
+}
+
+.course-folder-page .icon-btn {
+  display: inline-flex;
+  gap: 8px;
+  align-items: center;
+  white-space: nowrap;
+}
+
+/* Course details box */
+.course-folder-page .course-details {
+  margin-top: 14px;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  padding: 14px;
+  border-radius: 14px;
+}
+
+.course-folder-page .course-details p {
+  margin: 6px 0 0;
+  color: #0f172a;
+  font-size: 14px;
+}
+
+.course-folder-page .full {
+  width: 100%;
+}
+
+/* Empty states / info / warn */
+.course-folder-page .empty-state {
+  padding: 22px;
+  text-align: center;
+  color: #64748b;
+  background: #f8fafc;
+  border: 1px dashed #cbd5e1;
+  border-radius: 14px;
+}
+
+.course-folder-page .warn-box {
+  background: #fff7ed;
+  border: 1px solid #fed7aa;
+  color: #9a3412;
+  padding: 10px 12px;
+  border-radius: 12px;
+  font-size: 13px;
+}
+
+.course-folder-page .info-box {
+  background: #f1f5f9;
+  border: 1px solid #e2e8f0;
+  padding: 10px 12px;
+  border-radius: 12px;
+  color: #334155;
+  font-size: 13px;
+  margin-bottom: 12px;
+}
+
+.course-folder-page .hint {
+  margin-top: 10px;
+  font-size: 13px;
+  color: #64748b;
+}
+
+/* Folder tiles */
+.course-folder-page .folders-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+  margin-bottom: 18px;
+}
+
+@media (max-width: 1100px) {
+  .course-folder-page .folders-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 520px) {
+  .course-folder-page .folders-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.course-folder-page .folder-tile2 {
+  cursor: pointer;
+  text-align: left;
+  padding: 12px;
+  border-radius: 16px;
+  border: 1px solid #e2e8f0;
+  background: #ffffff;
+  box-shadow: 0 1px 0 rgba(15, 23, 42, 0.03);
+  transition: transform 0.12s ease, box-shadow 0.12s ease, border-color 0.12s ease;
+}
+
+.course-folder-page .folder-tile2:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 8px 18px rgba(15, 23, 42, 0.06);
+}
+
+.course-folder-page .folder-tile2.active {
+  border: 2px solid #2563eb;
+}
+
+.course-folder-page .folder-top {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.course-folder-page .folder-title {
+  font-size: 13px;
+  font-weight: 800;
+  color: #0f172a;
+}
+
+.course-folder-page .folder-sub {
+  font-size: 12px;
+  color: #64748b;
+  margin-top: 2px;
+}
+
+.course-folder-page .folder-icon {
+  width: 44px;
+  height: 34px;
+  border-radius: 12px;
+  background: linear-gradient(180deg, #facc15, #f59e0b);
+  position: relative;
+  flex: 0 0 44px;
+}
+
+.course-folder-page .folder-icon::after {
+  content: "";
+  position: absolute;
+  left: 15%;
+  top: 58%;
+  right: 15%;
+  height: 10px;
+  border-radius: 999px;
+  background: #1d4ed8;
+}
+
+/* Folder header */
+.course-folder-page .folder-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+
+.course-folder-page .folder-h1 {
+  font-size: 16px;
+  font-weight: 900;
+  color: #0f172a;
+}
+
+.course-folder-page .folder-h2 {
+  font-size: 13px;
+  color: #64748b;
+  margin-top: 2px;
+}
+
+/* Upload button (Course Folder only) */
+.course-folder-page .add-material-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  border: none;
+  padding: 10px 14px;
+  border-radius: 999px;
+  background: #2563eb;
+  color: #ffffff;
+  font-size: 13px;
+  font-weight: 700;
+  box-shadow: 0 10px 18px rgba(37, 99, 235, 0.25);
+  cursor: pointer;
+  transition: transform 0.12s ease, box-shadow 0.12s ease, background 0.12s ease;
+}
+
+.course-folder-page .add-material-btn svg {
+  width: 18px !important;
+  height: 18px !important;
+}
+
+.course-folder-page .add-material-btn:hover:not(:disabled) {
+  background: #1d4ed8;
+  transform: translateY(-1px);
+  box-shadow: 0 14px 22px rgba(37, 99, 235, 0.28);
+}
+
+.course-folder-page .add-material-btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+  transform: none;
+  box-shadow: none;
+}
+
+/* Materials list */
+.course-folder-page .materials-list {
+  border-top: 1px solid #e2e8f0;
+  padding-top: 12px;
+}
+
+.course-folder-page .material-card2 {
+  margin-bottom: 10px;
+  border-radius: 16px;
+  border: 1px solid #e2e8f0;
+  background: #ffffff;
+  overflow: hidden;
+  box-shadow: 0 2px 12px rgba(15, 23, 42, 0.05);
+}
+
+.course-folder-page .material-header2 {
+  width: 100%;
+  padding: 14px 16px;
+  border: none;
+  background: transparent;
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  cursor: pointer;
+  text-align: left;
+}
+
+.course-folder-page .material-header2:hover {
+  background: #f8fafc;
+}
+
+.course-folder-page .material-header2 svg {
+  width: 20px !important;
+  height: 20px !important;
+  flex: 0 0 20px !important;
+  margin-top: 2px;
+  color: #64748b;
+}
+
+.course-folder-page .material-text {
+  flex: 1;
+}
+
+.course-folder-page .material-title2 {
+  font-size: 14px;
+  font-weight: 900;
+  color: #0f172a;
+}
+
+.course-folder-page .material-desc2 {
+  font-size: 12px;
+  color: #64748b;
+  margin-top: 2px;
+}
+
+.course-folder-page .material-body2 {
+  border-top: 1px solid #e2e8f0;
+  padding: 12px 16px;
+  background: #ffffff;
+}
+
+.course-folder-page .file-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+}
+
+.course-folder-page .file-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: #0f172a;
+}
+
+.course-folder-page .file-left svg {
+  width: 18px !important;
+  height: 18px !important;
+  color: #94a3b8;
+}
+
+.course-folder-page .file-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.course-folder-page .file-action-link {
+  border: none;
+  background: transparent;
+  color: #2563eb;
+  font-size: 13px;
+  cursor: pointer;
+  padding: 0;
+  text-decoration: none;
+  font-weight: 600;
+}
+
+.course-folder-page .file-action-link:hover {
+  text-decoration: underline;
+}
+
+/* Assign Instructor */
+.course-folder-page .assign-card {
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 16px;
+  padding: 14px;
+}
+
+.course-folder-page .assign-row {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  align-items: center;
+  margin-bottom: 10px;
+}
+
+.course-folder-page .assign-search {
+  flex: 1;
+  min-width: 260px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  border: 1px solid #e2e8f0;
+  border-radius: 14px;
+  background: #ffffff;
+}
+
+.course-folder-page .assign-search svg {
+  width: 18px !important;
+  height: 18px !important;
+  color: #94a3b8;
+}
+
+.course-folder-page .assign-input {
+  width: 100%;
+  border: none;
+  outline: none;
+  font-size: 14px;
+}
+
+/* Bulk upload list */
+.course-folder-page .bulk-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: center;
+  margin-bottom: 16px;
+}
+
+.course-folder-page .tiny {
+  font-size: 12px;
+  color: #64748b;
+}
+
+.course-folder-page .muted {
+  color: #64748b;
+  font-size: 14px;
+}
+
+.course-folder-page .upload-list {
+  margin-top: 6px;
+  border-top: 1px solid #e2e8f0;
+}
+
+.course-folder-page .upload-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px 0;
+  border-bottom: 1px solid #e2e8f0;
+  gap: 12px;
+}
+
+.course-folder-page .upload-left {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.course-folder-page .upload-left svg {
+  width: 18px !important;
+  height: 18px !important;
+  color: #94a3b8;
+}
+
+.course-folder-page .upload-name {
+  font-size: 13px;
+  font-weight: 800;
+  color: #0f172a;
+}
+
+.course-folder-page .upload-date {
+  font-size: 11px;
+  color: #64748b;
+}
+
+.course-folder-page .upload-right {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 6px;
+}
+
+/* Status badges for bulk */
+.course-folder-page .status-badge2 {
+  font-size: 11px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  border: 1px solid #e2e8f0;
+  text-transform: capitalize;
+  font-weight: 700;
+  color: #334155;
+}
+
+.course-folder-page .status-badge2.complete {
+  border-color: #16a34a;
+  color: #16a34a;
+}
+
+.course-folder-page .status-badge2.incomplete {
+  border-color: #eab308;
+  color: #92400e;
+}
+
+.course-folder-page .status-badge2.invalid {
+  border-color: #ef4444;
+  color: #dc2626;
+}
+
+/* Small labels */
+.course-folder-page .small-label {
+  font-size: 13px;
+  color: #64748b;
+  display: block;
+  margin-bottom: 6px;
+}
+
+/* Side panel icon sizes safety */
+.course-folder-page .material-panel svg,
+.course-folder-page .material-dropzone svg,
+.course-folder-page .material-selected-files svg {
+  width: 20px !important;
+  height: 20px !important;
+  flex: 0 0 20px !important;
+}
+/* ============================= */
+/* COURSE FOLDER – ASSIGN TAB */
+/* ============================= */
+
+.course-folder-page .assign-card {
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 14px;
+  padding: 16px;
+}
+
+.course-folder-page .assign-row {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  margin-bottom: 12px;
+}
+
+.course-folder-page .assign-search {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  background: #ffffff;
+}
+
+.course-folder-page .assign-search svg {
+  width: 18px;
+  height: 18px;
+  color: #64748b;
+  flex-shrink: 0;
+}
+
+.course-folder-page .assign-input {
+  border: none;
+  outline: none;
+  width: 100%;
+  font-size: 14px;
+  background: transparent;
+}
+
+.course-folder-page .assign-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+
+.course-folder-page .assign-btn svg {
+  width: 18px;
+  height: 18px;
+}
+
+/* hint text */
+.course-folder-page .hint {
+  margin-top: 10px;
+  font-size: 13px;
+  color: #64748b;
+}
+
+/* prevent HUGE svg icons anywhere in assign tab */
+.course-folder-page svg {
+  max-width: 22px;
+  max-height: 22px;
+}
+
+/* ============================= */
+/* EMPTY STATE (nice & centered) */
+/* ============================= */
+
+.course-folder-page .empty-state {
+  padding: 24px;
+  text-align: center;
+  font-size: 14px;
+  color: #64748b;
+}
+
+/* ============================= */
+/* WARN / INFO BOX */
+/* ============================= */
+
+.course-folder-page .warn-box {
+  background: #fff7ed;
+  border: 1px solid #fed7aa;
+  color: #9a3412;
+  padding: 10px 12px;
+  border-radius: 10px;
+  font-size: 13px;
+}
+
+.course-folder-page .info-box {
+  background: #f1f5f9;
+  border: 1px solid #e2e8f0;
+  color: #334155;
+  padding: 10px 12px;
+  border-radius: 10px;
+  font-size: 13px;
+}

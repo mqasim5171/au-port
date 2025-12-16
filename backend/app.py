@@ -5,7 +5,10 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from core.db import init_db
 from core.schema_guard import ensure_all_tables_once
+from routers.execution_status import router as execution_status_router
 
+
+from routers.analysis import router as analysis_router
 from routers import (
     auth,
     users,
@@ -68,6 +71,11 @@ app.include_router(assessment_router.router)
 app.include_router(student_router.router)
 app.include_router(grading_audit_router.router)
 app.include_router(suggestions.router)
+
+app.include_router(analysis_router)
+
+app.include_router(execution_status_router)
+
 # ----------------------------------------------
 
 

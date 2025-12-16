@@ -1,5 +1,5 @@
 // src/pages/CourseFolder.js
-import React, { useEffect, useState, useCallback } from "react";
+import React, { useEffect, useMemo, useState, useCallback } from "react";
 import api from "../api";
 import {
   CloudArrowUpIcon,
@@ -8,8 +8,12 @@ import {
   ChevronDownIcon,
   ChevronRightIcon,
   XMarkIcon,
+  MagnifyingGlassIcon,
+  ArrowPathIcon,
+  UserPlusIcon,
 } from "@heroicons/react/24/outline";
 import "../App.css";
+
 import { useNavigate } from "react-router-dom";
 
 // ---------- helper to extract error ----------
@@ -38,10 +42,37 @@ const inferFolderFromTitle = (title = "") => {
   if (t.startsWith("quiz")) return "quizzes";
   if (t.startsWith("mid")) return "midterm";
   if (t.startsWith("final")) return "finalterm";
-  return "assignments"; // default bucket
+  return "assignments";
 };
 
-// ✅ accept user prop
+const Pill = ({ color = "#334155", bg = "#f1f5f9", border = "#e2e8f0", children }) => (
+  <span
+    style={{
+      fontSize: 12,
+      padding: "4px 10px",
+      borderRadius: 999,
+      border: `1px solid ${border}`,
+      background: bg,
+      color,
+      display: "inline-flex",
+      alignItems: "center",
+      gap: 6,
+      whiteSpace: "nowrap",
+    }}
+  >
+    {children}
+  </span>
+);
+
+const SectionTitle = ({ title, subtitle }) => (
+  <div style={{ marginBottom: 10 }}>
+    <div style={{ fontSize: 16, fontWeight: 800, color: "#0f172a" }}>{title}</div>
+    {subtitle ? (
+      <div style={{ fontSize: 13, color: "#64748b", marginTop: 2 }}>{subtitle}</div>
+    ) : null}
+  </div>
+);
+
 export default function CourseFolder({ user }) {
   const navigate = useNavigate();
 
@@ -52,15 +83,21 @@ export default function CourseFolder({ user }) {
   const isCourseLead = ["courselead"].includes(role);
   const isFaculty = ["faculty", "teacher"].includes(role);
 
-  // ✅ permissions for this page
   const canUploadMaterials = isAdmin || isHod || isCourseLead || isFaculty;
   const canBulkUpload = isAdmin || isHod || isCourseLead;
 
+  // ✅ admin/hod can assign course
+  const canAssignCourse = isAdmin || isHod;
+
+  const [activeTab, setActiveTab] = useState("materials"); // materials | guide | lectures | bulk | assign
+
   const [courses, setCourses] = useState([]);
+  const [coursesLoading, setCoursesLoading] = useState(false);
   const [selectedCourse, setSelectedCourse] = useState("");
 
   const [materials, setMaterials] = useState([]);
   const [loadingMaterials, setLoadingMaterials] = useState(false);
+
   const [pageErr, setPageErr] = useState("");
 
   // add-material side panel
@@ -71,34 +108,35 @@ export default function CourseFolder({ user }) {
   const [isSaving, setIsSaving] = useState(false);
   const [dragActive, setDragActive] = useState(false);
 
-  // which folder is open
   const [activeFolder, setActiveFolder] = useState(null);
-
-  // expanded material (for file list)
   const [expandedIds, setExpandedIds] = useState(new Set());
 
-  // --------- BULK COURSE FOLDER UPLOADS (file-explorer style) ----------
+  // BULK
   const [bulkUploads, setBulkUploads] = useState([]);
   const [bulkFiles, setBulkFiles] = useState([]);
   const [bulkUploading, setBulkUploading] = useState(false);
 
-  // ===================== PHASE-2 WORKFLOW (NEW) =====================
-  const [activeTab, setActiveTab] = useState("materials"); // "materials" | "guide" | "lectures"
-
-  // Course Guide
+  // COURSE GUIDE
   const [guideFile, setGuideFile] = useState(null);
   const [guideUploading, setGuideUploading] = useState(false);
 
-  // Weekly Lectures
+  // LECTURES
   const [lectureWeek, setLectureWeek] = useState(1);
   const [lectureFile, setLectureFile] = useState(null);
   const [lectureUploading, setLectureUploading] = useState(false);
-
-  // Execution Status
   const [executionStatus, setExecutionStatus] = useState(null);
 
-  // ------------ load courses ------------
-  useEffect(() => {
+  // ASSIGN
+  const [instructors, setInstructors] = useState([]);
+  const [instructorsLoading, setInstructorsLoading] = useState(false);
+  const [teacherSearch, setTeacherSearch] = useState("");
+  const [selectedTeacherId, setSelectedTeacherId] = useState("");
+  const [assigning, setAssigning] = useState(false);
+
+  // ===================== LOADERS =====================
+
+  const loadCourses = useCallback(() => {
+    setCoursesLoading(true);
     setPageErr("");
     api
       .get("/courses/my")
@@ -107,10 +145,14 @@ export default function CourseFolder({ user }) {
         const msg = extractErr(e);
         setPageErr(msg);
         if (e?.response?.status === 401) window.location.href = "/login";
-      });
+      })
+      .finally(() => setCoursesLoading(false));
   }, []);
 
-  // ------------ load materials ------------
+  useEffect(() => {
+    loadCourses();
+  }, [loadCourses]);
+
   const loadMaterials = useCallback(() => {
     if (!selectedCourse) {
       setMaterials([]);
@@ -129,7 +171,6 @@ export default function CourseFolder({ user }) {
       .finally(() => setLoadingMaterials(false));
   }, [selectedCourse]);
 
-  // ------------ load BULK course-folder uploads (from /upload router) ------------
   const loadBulkUploads = useCallback(() => {
     if (!selectedCourse) {
       setBulkUploads([]);
@@ -143,7 +184,6 @@ export default function CourseFolder({ user }) {
       });
   }, [selectedCourse]);
 
-  // ------------ load execution status (NEW) ------------
   const loadExecutionStatus = useCallback(() => {
     if (!selectedCourse) {
       setExecutionStatus(null);
@@ -157,17 +197,41 @@ export default function CourseFolder({ user }) {
       });
   }, [selectedCourse]);
 
+  const loadInstructors = useCallback(() => {
+    if (!canAssignCourse) {
+      setInstructors([]);
+      return;
+    }
+    setInstructorsLoading(true);
+    api
+      .get("/users?role=faculty")
+      .then((res) => setInstructors(res.data || []))
+      .catch((e) => {
+        console.error("Failed to load instructors:", extractErr(e));
+        setInstructors([]);
+      })
+      .finally(() => setInstructorsLoading(false));
+  }, [canAssignCourse]);
+
   useEffect(() => {
     loadMaterials();
     loadBulkUploads();
-    loadExecutionStatus(); // ✅ NEW
+    loadExecutionStatus();
     setActiveFolder(null);
     setExpandedIds(new Set());
   }, [loadMaterials, loadBulkUploads, loadExecutionStatus]);
 
-  const selectedCourseData = courses.find((c) => c.id === selectedCourse);
+  useEffect(() => {
+    if (activeTab === "assign") loadInstructors();
+  }, [activeTab, loadInstructors]);
 
-  // ------------ side panel logic (per-material upload) ------------
+  const selectedCourseData = useMemo(
+    () => courses.find((c) => c.id === selectedCourse),
+    [courses, selectedCourse]
+  );
+
+  // ===================== MATERIAL PANEL =====================
+
   const resetMaterialForm = () => {
     setMaterialTitle("");
     setMaterialDescription("");
@@ -176,14 +240,8 @@ export default function CourseFolder({ user }) {
   };
 
   const openPanel = () => {
-    if (!selectedCourse) {
-      alert("Please select a course first.");
-      return;
-    }
-    if (!canUploadMaterials) {
-      alert("You are not allowed to upload materials for this course.");
-      return;
-    }
+    if (!selectedCourse) return alert("Please select a course first.");
+    if (!canUploadMaterials) return alert("You are not allowed to upload materials.");
 
     if (activeFolder === "assignments") setMaterialTitle("Assignment ");
     else if (activeFolder === "quizzes") setMaterialTitle("Quiz ");
@@ -200,18 +258,10 @@ export default function CourseFolder({ user }) {
   };
 
   const handleSaveMaterial = async () => {
-    if (!materialTitle.trim()) {
-      alert("Please enter a material title.");
-      return;
-    }
-    if (!selectedCourse) {
-      alert("Please select a course first.");
-      return;
-    }
-    if (!canUploadMaterials) {
-      alert("You are not allowed to upload materials for this course.");
-      return;
-    }
+    if (!materialTitle.trim()) return alert("Please enter a material title.");
+    if (!selectedCourse) return alert("Please select a course first.");
+    if (!canUploadMaterials) return alert("You are not allowed to upload materials.");
+    if (!materialFiles.length) return alert("Please attach at least one file.");
 
     setIsSaving(true);
     setPageErr("");
@@ -219,8 +269,7 @@ export default function CourseFolder({ user }) {
     try {
       const fd = new FormData();
       fd.append("title", materialTitle.trim());
-      if (materialDescription.trim())
-        fd.append("description", materialDescription.trim());
+      if (materialDescription.trim()) fd.append("description", materialDescription.trim());
       if (activeFolder) fd.append("folder_hint", activeFolder);
       materialFiles.forEach((f) => fd.append("files", f));
 
@@ -245,28 +294,23 @@ export default function CourseFolder({ user }) {
     });
   };
 
-  // ------------ group materials into 4 folders (file-level) ------------
-  const folderFiles = {
-    assignments: [],
-    quizzes: [],
-    midterm: [],
-    finalterm: [],
-  };
-
-  materials.forEach((m) => {
-    const folder =
-      m.folder || m.folder_type || inferFolderFromTitle(m.title || "");
-    (m.files || []).forEach((f) => {
-      folderFiles[folder]?.push({
-        ...f,
-        materialId: m.id,
-        materialTitle: m.title,
-        materialDescription: m.description,
+  // group materials into 4 folders (file-level)
+  const folderFiles = useMemo(() => {
+    const out = { assignments: [], quizzes: [], midterm: [], finalterm: [] };
+    (materials || []).forEach((m) => {
+      const folder = m.folder || m.folder_type || inferFolderFromTitle(m.title || "");
+      (m.files || []).forEach((f) => {
+        out[folder]?.push({
+          ...f,
+          materialId: m.id,
+          materialTitle: m.title,
+          materialDescription: m.description,
+        });
       });
     });
-  });
+    return out;
+  }, [materials]);
 
-  // ------------ analyze file (single material file) ------------
   const analyzeFile = async (fileId) => {
     try {
       const res = await api.get(`/analysis/${fileId}`);
@@ -276,7 +320,7 @@ export default function CourseFolder({ user }) {
     }
   };
 
-  // ------------ handlers for BULK course-folder uploads ------------
+  // ===================== BULK =====================
   const handleBulkFilesFromInput = (e) => {
     const files = Array.from(e.target.files || []);
     setBulkFiles(files);
@@ -284,18 +328,9 @@ export default function CourseFolder({ user }) {
 
   const handleBulkUpload = async (e) => {
     e.preventDefault();
-    if (!selectedCourse) {
-      alert("Please select a course first.");
-      return;
-    }
-    if (!canBulkUpload) {
-      alert("Only Course Lead / HOD / Admin can upload full course folders.");
-      return;
-    }
-    if (!bulkFiles.length) {
-      alert("Please choose at least one file (ZIP, PDF, DOCX…).");
-      return;
-    }
+    if (!selectedCourse) return alert("Select a course first.");
+    if (!canBulkUpload) return alert("Only Course Lead / HOD / Admin can bulk upload.");
+    if (!bulkFiles.length) return alert("Choose at least one file.");
 
     setBulkUploading(true);
     try {
@@ -309,19 +344,17 @@ export default function CourseFolder({ user }) {
       setBulkFiles([]);
       await loadBulkUploads();
     } catch (e) {
-      const msg = extractErr(e);
-      alert("Error uploading course folder: " + msg);
+      alert("Error uploading course folder: " + extractErr(e));
       if (e?.response?.status === 401) window.location.href = "/login";
     } finally {
       setBulkUploading(false);
     }
   };
 
-  // ===================== PHASE-2 UPLOAD HANDLERS (NEW) =====================
+  // ===================== GUIDE / LECTURES =====================
   const handleUploadCourseGuide = async () => {
     if (!selectedCourse) return alert("Select a course first.");
-    if (!canUploadMaterials)
-      return alert("You are not allowed to upload course guide.");
+    if (!canUploadMaterials) return alert("You are not allowed to upload course guide.");
     if (!guideFile) return alert("Choose a course guide file first.");
 
     setGuideUploading(true);
@@ -345,8 +378,7 @@ export default function CourseFolder({ user }) {
 
   const handleUploadWeeklyLecture = async () => {
     if (!selectedCourse) return alert("Select a course first.");
-    if (!canUploadMaterials)
-      return alert("You are not allowed to upload lectures.");
+    if (!canUploadMaterials) return alert("You are not allowed to upload lectures.");
     if (!lectureFile) return alert("Choose a lecture file first.");
 
     setLectureUploading(true);
@@ -368,14 +400,86 @@ export default function CourseFolder({ user }) {
     }
   };
 
-  // ------------ UI RENDER ------------
+  // ===================== ASSIGN =====================
+  const filteredInstructors = useMemo(() => {
+    const q = teacherSearch.trim().toLowerCase();
+    if (!q) return instructors;
+    return (instructors || []).filter((u) => {
+      const name = (u.full_name || "").toLowerCase();
+      const uname = (u.username || "").toLowerCase();
+      const email = (u.email || "").toLowerCase();
+      return name.includes(q) || uname.includes(q) || email.includes(q);
+    });
+  }, [instructors, teacherSearch]);
+
+  const handleAssignTeacher = async () => {
+    if (!selectedCourse) return alert("Select a course first.");
+    if (!canAssignCourse) return alert("Only Admin/HOD can assign courses.");
+    if (!selectedTeacherId) return alert("Select an instructor.");
+
+    setAssigning(true);
+    try {
+      await api.post(`/courses/${selectedCourse}/assign`, {
+        user_id: selectedTeacherId,
+        assignment_role: "TEACHER",
+      });
+      alert("✅ Instructor assigned successfully.");
+      loadCourses();
+    } catch (e) {
+      alert("Assign failed: " + extractErr(e));
+    } finally {
+      setAssigning(false);
+    }
+  };
+
+  // ===================== UI =====================
+
+  const RoleBadge = () => (
+    <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+      <Pill>
+        Logged in: <strong>{user?.full_name || user?.username || "Unknown"}</strong>
+      </Pill>
+      <Pill bg="#eef2ff" border="#c7d2fe" color="#3730a3">
+        Role: <strong>{user?.role || "unknown"}</strong>
+      </Pill>
+      {isAdmin && <Pill bg="#ecfeff" border="#a5f3fc" color="#155e75">Admin</Pill>}
+      {isHod && <Pill bg="#f0fdf4" border="#bbf7d0" color="#166534">HOD</Pill>}
+      {isCourseLead && <Pill bg="#fff7ed" border="#fed7aa" color="#9a3412">Course Lead</Pill>}
+      {isFaculty && <Pill bg="#f8fafc" border="#e2e8f0" color="#334155">Faculty</Pill>}
+    </div>
+  );
+
+  const Tabs = () => {
+    const TabBtn = ({ id, label, disabled }) => (
+      <button
+        type="button"
+        className={activeTab === id ? "btn-tab active" : "btn-tab"}
+        onClick={() => setActiveTab(id)}
+        disabled={disabled}
+        title={disabled ? "Select a course first" : ""}
+      >
+        {label}
+      </button>
+    );
+
+    return (
+      <div className="tabs-row">
+        <TabBtn id="materials" label="Materials" />
+        <TabBtn id="bulk" label="Bulk Uploads" disabled={!selectedCourse} />
+        <TabBtn id="guide" label="Course Guide" disabled={!selectedCourse} />
+        <TabBtn id="lectures" label="Weekly Lectures" disabled={!selectedCourse} />
+        {canAssignCourse && <TabBtn id="assign" label="Assign Instructor" />}
+      </div>
+    );
+  };
+
+  // ---------- MAIN RENDER ----------
   return (
-    <div className="fade-in">
+    <div className="fade-in course-folder-page">
       <div className="page-header">
         <h1 className="page-title">Course Folder</h1>
         <p className="page-subtitle">
-          Choose a course, open a folder, and manage both individual materials
-          and full course-folder uploads in one place.
+          Select a course and manage materials, bulk uploads, course guide, and weekly lectures.
         </p>
       </div>
 
@@ -385,642 +489,455 @@ export default function CourseFolder({ user }) {
         </div>
       )}
 
-      {/* ✅ Optional: small role badge */}
-      <div style={{ marginBottom: 12, color: "#64748b", fontSize: 13 }}>
-        Logged in as: <strong>{user?.full_name || user?.username}</strong>{" "}
-        <span style={{ marginLeft: 8 }}>
-          Role: <strong>{user?.role || "unknown"}</strong>
-        </span>
+      <div style={{ marginBottom: 14 }}>
+        <RoleBadge />
       </div>
 
-      {/* ===================== WORKFLOW TABS (NEW) ===================== */}
-      <div
-        style={{
-          display: "flex",
-          gap: 10,
-          marginBottom: 16,
-          flexWrap: "wrap",
-        }}
-      >
-        <button
-          className={activeTab === "materials" ? "btn-primary" : "btn-ghost"}
-          type="button"
-          onClick={() => setActiveTab("materials")}
-        >
-          Materials & Assessments
-        </button>
-
-        <button
-          className={activeTab === "guide" ? "btn-primary" : "btn-ghost"}
-          type="button"
-          onClick={() => setActiveTab("guide")}
-          disabled={!selectedCourse}
-          title={!selectedCourse ? "Select a course first" : ""}
-        >
-          Course Guide
-        </button>
-
-        <button
-          className={activeTab === "lectures" ? "btn-primary" : "btn-ghost"}
-          type="button"
-          onClick={() => setActiveTab("lectures")}
-          disabled={!selectedCourse}
-          title={!selectedCourse ? "Select a course first" : ""}
-        >
-          Weekly Lectures
-        </button>
+      <div style={{ marginBottom: 14 }}>
+        <Tabs />
       </div>
 
-      {/* ===================== TAB: COURSE GUIDE (NEW) ===================== */}
-      {activeTab === "guide" && selectedCourse && (
-        <div className="card" style={{ marginTop: 16 }}>
+      <div className="course-folder-grid">
+        {/* LEFT COLUMN */}
+        <div className="card">
           <div className="card-header">
-            <h2 className="card-title">Course Guide</h2>
-            <p className="card-subtitle">
-              Upload the official course guide (drives weekly execution monitoring).
-            </p>
+            <h2 className="card-title">Course</h2>
+            <p className="card-subtitle">Your assigned courses appear here.</p>
           </div>
 
-          <div
-            className="card-content"
-            style={{ display: "flex", gap: 12, flexWrap: "wrap" }}
-          >
-            <input
-              type="file"
-              onChange={(e) => setGuideFile(e.target.files?.[0] || null)}
-              disabled={!canUploadMaterials || guideUploading}
-            />
+          <div className="card-content">
+            <div className="row" style={{ gap: 10 }}>
+              <select
+                value={selectedCourse}
+                onChange={(e) => setSelectedCourse(e.target.value)}
+                className="form-input"
+                style={{ flex: 1 }}
+                disabled={coursesLoading || !courses.length}
+              >
+                <option value="">
+                  {coursesLoading
+                    ? "Loading..."
+                    : courses.length
+                      ? "Choose a course..."
+                      : "No courses available"}
+                </option>
+                {courses.map((course) => (
+                  <option key={course.id} value={course.id}>
+                    {course.course_code} - {course.course_name}
+                  </option>
+                ))}
+              </select>
 
-            <button
-              type="button"
-              className="btn-primary"
-              onClick={handleUploadCourseGuide}
-              disabled={!canUploadMaterials || guideUploading || !guideFile}
-            >
-              {guideUploading ? "Uploading..." : "Upload Course Guide"}
-            </button>
+              <button
+                type="button"
+                className="btn-ghost icon-btn"
+                onClick={loadCourses}
+                title="Refresh courses"
+              >
+                <ArrowPathIcon />
+                Refresh
+              </button>
+            </div>
 
-            {!canUploadMaterials && (
-              <span style={{ fontSize: 13, color: "#9a3412" }}>
-                Upload disabled for your role.
-              </span>
+            {!coursesLoading && !courses.length && (
+              <div className="warn-box" style={{ marginTop: 12 }}>
+                <strong>No courses found for your account.</strong>
+                <div style={{ marginTop: 6 }}>
+                  If you are a teacher, ask Admin/HOD to assign you a course from the{" "}
+                  <strong>Assign Instructor</strong> tab.
+                </div>
+              </div>
+            )}
+
+            {selectedCourseData && (
+              <div className="course-details">
+                <SectionTitle title="Course Details" />
+                <p><strong>Code:</strong> {selectedCourseData.course_code}</p>
+                <p><strong>Name:</strong> {selectedCourseData.course_name}</p>
+                <p><strong>Semester:</strong> {selectedCourseData.semester} {selectedCourseData.year}</p>
+                <p><strong>Department:</strong> {selectedCourseData.department}</p>
+
+                <button
+                  type="button"
+                  className="btn-primary full"
+                  onClick={() => navigate(`/courses/${selectedCourse}/assessments`)}
+                  disabled={!selectedCourse}
+                >
+                  Open Assessments
+                </button>
+              </div>
             )}
           </div>
         </div>
-      )}
 
-      {/* ===================== TAB: WEEKLY LECTURES (NEW) ===================== */}
-      {activeTab === "lectures" && selectedCourse && (
-        <div className="card" style={{ marginTop: 16 }}>
+        {/* RIGHT COLUMN */}
+        <div className="card">
           <div className="card-header">
-            <h2 className="card-title">Weekly Lectures</h2>
+            <h2 className="card-title">
+              {activeTab === "materials"
+                ? "Materials"
+                : activeTab === "bulk"
+                  ? "Bulk Uploads"
+                  : activeTab === "guide"
+                    ? "Course Guide"
+                    : activeTab === "lectures"
+                      ? "Weekly Lectures"
+                      : "Assign Instructor"}
+            </h2>
             <p className="card-subtitle">
-              Upload lectures week-wise and track execution status.
+              {activeTab === "materials"
+                ? "Assignments, quizzes, mid-term and final-term files."
+                : activeTab === "bulk"
+                  ? "Upload complete course folders (ZIP/PDF/DOCX)."
+                  : activeTab === "guide"
+                    ? "Upload the official course guide document."
+                    : activeTab === "lectures"
+                      ? "Upload weekly lectures and check execution status."
+                      : "Assign course to a teacher/instructor."}
             </p>
           </div>
 
           <div className="card-content">
-            {executionStatus && (
-              <div
-                style={{
-                  background: executionStatus.is_on_track ? "#ecfdf5" : "#fff7ed",
-                  border: `1px solid ${
-                    executionStatus.is_on_track ? "#bbf7d0" : "#fed7aa"
-                  }`,
-                  padding: 12,
-                  borderRadius: 12,
-                  marginBottom: 12,
-                  color: executionStatus.is_on_track ? "#166534" : "#9a3412",
-                  fontSize: 13,
-                }}
-              >
-                <strong>
-                  {executionStatus.is_on_track ? "On Track ✅" : "Deviation Detected ⚠️"}
-                </strong>
-                <div style={{ marginTop: 6 }}>
-                  Missing Weeks:{" "}
-                  <strong>
-                    {executionStatus.missing_weeks?.length
-                      ? executionStatus.missing_weeks.join(", ")
-                      : "None"}
-                  </strong>
-                </div>
+            {!selectedCourse && activeTab !== "assign" ? (
+              <div className="empty-state">
+                Select a course from the left to continue.
               </div>
-            )}
+            ) : null}
 
-            <div
-              style={{
-                display: "flex",
-                gap: 12,
-                flexWrap: "wrap",
-                alignItems: "center",
-              }}
-            >
-              <div>
-                <label style={{ fontSize: 13, color: "#64748b" }}>Week</label>
-                <select
-                  className="form-input"
-                  value={lectureWeek}
-                  onChange={(e) => setLectureWeek(Number(e.target.value))}
-                  style={{ width: 140 }}
-                >
-                  {Array.from({ length: 16 }).map((_, i) => (
-                    <option key={i} value={i + 1}>
-                      Week {i + 1}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              <div>
-                <label style={{ fontSize: 13, color: "#64748b" }}>Lecture File</label>
-                <input
-                  type="file"
-                  onChange={(e) => setLectureFile(e.target.files?.[0] || null)}
-                  disabled={!canUploadMaterials || lectureUploading}
-                />
-              </div>
-
-              <button
-                type="button"
-                className="btn-primary"
-                onClick={handleUploadWeeklyLecture}
-                disabled={!canUploadMaterials || lectureUploading || !lectureFile}
-                style={{ height: 40, marginTop: 18 }}
-              >
-                {lectureUploading ? "Uploading..." : "Upload Lecture"}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* ===================== TAB: MATERIALS (YOUR EXISTING UI) ===================== */}
-      {activeTab === "materials" && (
-        <>
-          <div
-            style={{
-              display: "grid",
-              gridTemplateColumns: "1.1fr 2fr",
-              gap: 24,
-              alignItems: "flex-start",
-            }}
-          >
-            {/* LEFT: course selection */}
-            <div className="card">
-              <div className="card-header">
-                <h2 className="card-title">Select Course</h2>
-              </div>
-              <div className="card-content">
-                <select
-                  value={selectedCourse}
-                  onChange={(e) => setSelectedCourse(e.target.value)}
-                  className="form-input"
-                  style={{ marginBottom: 16 }}
-                  disabled={!courses.length}
-                >
-                  <option value="">
-                    {courses.length ? "Choose a course..." : "No courses available"}
-                  </option>
-                  {courses.map((course) => (
-                    <option key={course.id} value={course.id}>
-                      {course.course_code} - {course.course_name}
-                    </option>
-                  ))}
-                </select>
-
-                {selectedCourseData && (
-                  <div
-                    style={{
-                      background: "#f8fafc",
-                      padding: 16,
-                      borderRadius: 12,
-                      marginBottom: 16,
-                    }}
-                  >
-                    <h3 style={{ fontWeight: 600, marginBottom: 8 }}>
-                      Course Details
-                    </h3>
-                    <p>
-                      <strong>Instructor:</strong> {selectedCourseData.instructor}
-                    </p>
-                    <p>
-                      <strong>Semester:</strong>{" "}
-                      {selectedCourseData.semester} {selectedCourseData.year}
-                    </p>
-                    <p>
-                      <strong>Department:</strong> {selectedCourseData.department}
-                    </p>
-                    <button
-                      type="button"
-                      className="btn-primary"
-                      style={{ marginTop: 12, width: "100%" }}
-                      onClick={() =>
-                        navigate(`/courses/${selectedCourse}/assessments`)
-                      }
-                    >
-                      Open Assessments
-                    </button>
-                  </div>
-                )}
-              </div>
-            </div>
-
-            {/* RIGHT: folder view (per-material files) */}
-            <div className="card">
-              <div className="card-header">
-                <h2 className="card-title">Course Folders</h2>
-              </div>
-              <div className="card-content">
-                {!selectedCourse ? (
-                  <p style={{ textAlign: "center", color: "#64748b", padding: 48 }}>
-                    Select a course to view its folders.
-                  </p>
-                ) : loadingMaterials ? (
-                  <p style={{ textAlign: "center", color: "#64748b", padding: 48 }}>
-                    Loading materials...
-                  </p>
+            {/* ===================== TAB: ASSIGN ===================== */}
+            {activeTab === "assign" && (
+              <div className="assign-card">
+                {!canAssignCourse ? (
+                  <div style={{ color: "#9a3412" }}>You do not have permission.</div>
                 ) : (
                   <>
-                    {/* folder icons */}
-                    <div
-                      style={{
-                        display: "grid",
-                        gridTemplateColumns: "repeat(4, minmax(0, 1fr))",
-                        gap: 16,
-                        marginBottom: 24,
-                      }}
-                    >
-                      {FOLDERS.map((f) => {
-                        const isActive = activeFolder === f.key;
-                        return (
-                          <div
-                            key={f.key}
-                            className="folder-tile"
-                            onClick={() => setActiveFolder(f.key)}
-                            onDoubleClick={() => setActiveFolder(f.key)}
-                            style={{
-                              cursor: "pointer",
-                              textAlign: "center",
-                              padding: 12,
-                              borderRadius: 12,
-                              border: isActive
-                                ? "2px solid #2563eb"
-                                : "1px solid #e2e8f0",
-                              background: "#f8fafc",
-                            }}
-                          >
-                            <div
-                              style={{
-                                width: 48,
-                                height: 36,
-                                margin: "0 auto 8px",
-                                borderRadius: 6,
-                                background:
-                                  "linear-gradient(180deg,#facc15,#f59e0b)",
-                                position: "relative",
-                              }}
-                            >
-                              <div
-                                style={{
-                                  position: "absolute",
-                                  left: "15%",
-                                  top: "55%",
-                                  right: "15%",
-                                  height: 10,
-                                  borderRadius: 4,
-                                  background: "#1d4ed8",
-                                }}
-                              />
-                            </div>
-                            <div
-                              style={{
-                                fontSize: 13,
-                                fontWeight: 500,
-                                color: isActive ? "#1d4ed8" : "#0f172a",
-                              }}
-                            >
-                              {f.label}
-                            </div>
-                          </div>
-                        );
-                      })}
-                    </div>
+                    <SectionTitle
+                      title="Assign Instructor to Selected Course"
+                      subtitle="Choose a course on the left, then assign a teacher."
+                    />
 
-                    {/* opened folder contents */}
-                    {activeFolder ? (
-                      <div>
-                        <div
-                          style={{
-                            display: "flex",
-                            justifyContent: "space-between",
-                            alignItems: "center",
-                            marginBottom: 8,
-                          }}
-                        >
-                          <h3 style={{ fontSize: 16, fontWeight: 600 }}>
-                            {FOLDERS.find((f) => f.key === activeFolder)?.label}{" "}
-                            Folder
-                          </h3>
+                    {!selectedCourse ? (
+                      <div className="warn-box">Select a course first.</div>
+                    ) : (
+                      <>
+                        <div className="assign-row">
+                          <div className="assign-search">
+                            <MagnifyingGlassIcon />
+                            <input
+                              className="assign-input"
+                              placeholder="Search by name / username / email"
+                              value={teacherSearch}
+                              onChange={(e) => setTeacherSearch(e.target.value)}
+                            />
+                          </div>
 
                           <button
                             type="button"
-                            className="add-material-btn"
-                            style={{
-                              padding: "6px 12px",
-                              fontSize: 13,
-                              opacity: canUploadMaterials ? 1 : 0.55,
-                              cursor: canUploadMaterials
-                                ? "pointer"
-                                : "not-allowed",
-                            }}
-                            onClick={openPanel}
-                            disabled={!canUploadMaterials}
-                            title={
-                              canUploadMaterials
-                                ? "Upload new material"
-                                : "You don't have permission to upload materials"
-                            }
+                            className="btn-ghost icon-btn"
+                            onClick={loadInstructors}
                           >
-                            <PlusCircleIcon className="w-4 h-4" />
-                            <span style={{ marginLeft: 4 }}>Upload File</span>
+                            <ArrowPathIcon />
+                            Refresh
                           </button>
                         </div>
 
-                        {!canUploadMaterials && (
-                          <div
-                            style={{
-                              background: "#fff7ed",
-                              border: "1px solid #fed7aa",
-                              color: "#9a3412",
-                              padding: "10px 12px",
-                              borderRadius: 10,
-                              marginBottom: 10,
-                              fontSize: 13,
-                            }}
-                          >
-                            Upload is disabled for your role. You can view/download
-                            files only.
-                          </div>
-                        )}
-
-                        <div
-                          style={{
-                            borderTop: "1px solid #e2e8f0",
-                            paddingTop: 8,
-                          }}
+                        <select
+                          className="form-input"
+                          value={selectedTeacherId}
+                          onChange={(e) => setSelectedTeacherId(e.target.value)}
+                          disabled={instructorsLoading}
                         >
-                          {folderFiles[activeFolder]?.length ? (
-                            folderFiles[activeFolder].map((f) => {
-                              const matId = f.materialId;
-                              const isExpanded = expandedIds.has(matId);
+                          <option value="">
+                            {instructorsLoading ? "Loading teachers..." : "Choose instructor..."}
+                          </option>
+                          {(filteredInstructors || []).map((t) => (
+                            <option key={t.id} value={t.id}>
+                              {t.full_name || t.username} {t.email ? `(${t.email})` : ""}
+                            </option>
+                          ))}
+                        </select>
 
-                              return (
-                                <div
-                                  key={f.id}
-                                  className="material-card"
-                                  style={{ marginBottom: 8 }}
-                                >
-                                  <button
-                                    type="button"
-                                    className="material-header"
-                                    onClick={() => toggleExpanded(matId)}
-                                  >
-                                    {isExpanded ? (
-                                      <ChevronDownIcon className="w-5 h-5 text-slate-500" />
-                                    ) : (
-                                      <ChevronRightIcon className="w-5 h-5 text-slate-500" />
-                                    )}
-                                    <div
-                                      style={{ marginLeft: 8, textAlign: "left" }}
-                                    >
-                                      <div className="material-title">
-                                        {f.materialTitle}
-                                      </div>
-                                      <div className="material-description">
-                                        {f.materialDescription || "File"}
-                                      </div>
-                                    </div>
-                                  </button>
+                        <button
+                          type="button"
+                          className="btn-primary full assign-btn"
+                          onClick={handleAssignTeacher}
+                          disabled={!selectedCourse || !selectedTeacherId || assigning}
+                          style={{ marginTop: 12 }}
+                        >
+                          <UserPlusIcon />
+                          {assigning ? "Assigning..." : "Assign Instructor"}
+                        </button>
 
-                                  {isExpanded && (
-                                    <div className="material-body">
-                                      <div className="material-file-row">
-                                        <div
-                                          style={{
-                                            display: "flex",
-                                            alignItems: "center",
-                                          }}
-                                        >
-                                          <DocumentIcon className="w-5 h-5 text-slate-400" />
-                                          <span style={{ marginLeft: 8 }}>
-                                            {f.display_name || f.filename}
-                                          </span>
-                                        </div>
-
-                                        <div style={{ display: "flex", gap: 12 }}>
-                                          {f.url && (
-                                            <a
-                                              href={f.url}
-                                              target="_blank"
-                                              rel="noreferrer"
-                                              className="file-action-link"
-                                            >
-                                              Open
-                                            </a>
-                                          )}
-                                          <button
-                                            type="button"
-                                            className="file-action-link"
-                                            onClick={() => analyzeFile(f.id)}
-                                          >
-                                            Analyze
-                                          </button>
-                                        </div>
-                                      </div>
-                                    </div>
-                                  )}
-                                </div>
-                              );
-                            })
-                          ) : (
-                            <p
-                              style={{
-                                padding: 24,
-                                textAlign: "center",
-                                color: "#64748b",
-                                fontSize: 14,
-                              }}
-                            >
-                              This folder is empty.
-                            </p>
-                          )}
+                        <div className="hint">
+                          After assigning, the teacher will see this course in <strong>Courses → My Courses</strong>.
                         </div>
-                      </div>
-                    ) : (
-                      <p
-                        style={{
-                          textAlign: "center",
-                          color: "#64748b",
-                          fontSize: 14,
-                        }}
-                      >
-                        Double-click a folder icon to open it.
-                      </p>
+                      </>
                     )}
                   </>
                 )}
               </div>
-            </div>
-          </div>
+            )}
 
-          {/* ---------- BULK COURSE FOLDER UPLOADS SECTION ---------- */}
-          {selectedCourse && (
-            <div className="card" style={{ marginTop: 24 }}>
-              <div className="card-header">
-                <h2 className="card-title">Course Folder Uploads (Bulk)</h2>
-                <p className="card-subtitle">
-                  Upload full course folders (ZIP / PDF / DOCX) for automatic validation.
-                </p>
-              </div>
+            {/* ===================== TAB: MATERIALS ===================== */}
+            {activeTab === "materials" && selectedCourse && (
+              <>
+                <div className="folders-grid">
+                  {FOLDERS.map((f) => {
+                    const isActive = activeFolder === f.key;
+                    const count = folderFiles[f.key]?.length || 0;
+                    return (
+                      <div
+                        key={f.key}
+                        className={`folder-tile2 ${isActive ? "active" : ""}`}
+                        onClick={() => setActiveFolder(f.key)}
+                      >
+                        <div className="folder-top">
+                          <div>
+                            <div className="folder-title">{f.label}</div>
+                            <div className="folder-sub">{count} file(s)</div>
+                          </div>
+                          <div className="folder-icon" />
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
 
-              <div className="card-content">
-                {!canBulkUpload && (
-                  <div
-                    style={{
-                      background: "#f1f5f9",
-                      border: "1px solid #e2e8f0",
-                      padding: "10px 12px",
-                      borderRadius: 10,
-                      color: "#334155",
-                      fontSize: 13,
-                      marginBottom: 12,
-                    }}
+                <div className="folder-header">
+                  <div>
+                    <div className="folder-h1">
+                      {activeFolder
+                        ? `${FOLDERS.find((x) => x.key === activeFolder)?.label} Folder`
+                        : "Open a folder"}
+                    </div>
+                    <div className="folder-h2">
+                      {activeFolder ? "Click a card to expand and open a file." : "Select any folder tile above."}
+                    </div>
+                  </div>
+
+                  <button
+                    type="button"
+                    className="add-material-btn"
+                    onClick={openPanel}
+                    disabled={!canUploadMaterials || !activeFolder}
+                    title={
+                      !activeFolder
+                        ? "Open a folder first"
+                        : canUploadMaterials
+                          ? "Upload new material"
+                          : "No upload permission"
+                    }
                   >
-                    Bulk upload is restricted to{" "}
-                    <strong>Course Lead / HOD / Admin</strong>.
+                    <PlusCircleIcon />
+                    Upload
+                  </button>
+                </div>
+
+                {!activeFolder ? (
+                  <div className="empty-state">Choose a folder to view files.</div>
+                ) : loadingMaterials ? (
+                  <div className="empty-state">Loading materials...</div>
+                ) : (
+                  <div className="materials-list">
+                    {(folderFiles[activeFolder] || []).length ? (
+                      (folderFiles[activeFolder] || []).map((f) => {
+                        const matId = f.materialId;
+                        const isExpanded = expandedIds.has(matId);
+
+                        return (
+                          <div key={f.id} className="material-card2">
+                            <button
+                              type="button"
+                              className="material-header2"
+                              onClick={() => toggleExpanded(matId)}
+                            >
+                              {isExpanded ? <ChevronDownIcon /> : <ChevronRightIcon />}
+                              <div className="material-text">
+                                <div className="material-title2">{f.materialTitle}</div>
+                                <div className="material-desc2">{f.materialDescription || "No description"}</div>
+                              </div>
+                            </button>
+
+                            {isExpanded && (
+                              <div className="material-body2">
+                                <div className="file-row">
+                                  <div className="file-left">
+                                    <DocumentIcon />
+                                    <span>{f.display_name || f.filename}</span>
+                                  </div>
+
+                                  <div className="file-actions">
+                                    {f.url && (
+                                      <a href={f.url} target="_blank" rel="noreferrer" className="file-action-link">
+                                        Open
+                                      </a>
+                                    )}
+                                    <button
+                                      type="button"
+                                      className="file-action-link"
+                                      onClick={() => analyzeFile(f.id)}
+                                    >
+                                      Analyze
+                                    </button>
+                                  </div>
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })
+                    ) : (
+                      <div className="empty-state">This folder is empty.</div>
+                    )}
+                  </div>
+                )}
+              </>
+            )}
+
+            {/* ===================== TAB: BULK ===================== */}
+            {activeTab === "bulk" && selectedCourse && (
+              <>
+                {!canBulkUpload && (
+                  <div className="info-box">
+                    Bulk upload is restricted to <strong>Course Lead / HOD / Admin</strong>.
                   </div>
                 )}
 
-                <form
-                  onSubmit={handleBulkUpload}
-                  style={{
-                    display: "flex",
-                    flexWrap: "wrap",
-                    gap: 12,
-                    alignItems: "center",
-                    marginBottom: 16,
-                    opacity: canBulkUpload ? 1 : 0.55,
-                  }}
-                >
-                  <input
-                    type="file"
-                    multiple
-                    onChange={handleBulkFilesFromInput}
-                    disabled={bulkUploading || !canBulkUpload}
-                  />
-                  <button
-                    type="submit"
-                    className="btn-primary"
-                    disabled={bulkUploading || !bulkFiles.length || !canBulkUpload}
-                  >
+                <form onSubmit={handleBulkUpload} className="bulk-row" style={{ opacity: canBulkUpload ? 1 : 0.55 }}>
+                  <input type="file" multiple onChange={handleBulkFilesFromInput} disabled={bulkUploading || !canBulkUpload} />
+                  <button type="submit" className="btn-primary" disabled={bulkUploading || !bulkFiles.length || !canBulkUpload}>
                     {bulkUploading ? "Uploading..." : "Upload Course Folder(s)"}
                   </button>
                   {bulkFiles.length > 0 && !bulkUploading && (
-                    <span style={{ fontSize: 12, color: "#64748b" }}>
-                      {bulkFiles.length} file(s) selected
-                    </span>
+                    <span className="tiny">{bulkFiles.length} file(s) selected</span>
                   )}
                 </form>
 
-                <div style={{ marginTop: 8 }}>
-                  <h3 style={{ fontWeight: 600, fontSize: 14, marginBottom: 8 }}>
-                    Previous uploads
-                  </h3>
+                <SectionTitle title="Previous uploads" />
+                {!bulkUploads.length ? (
+                  <p className="muted">No course folders uploaded yet for this course.</p>
+                ) : (
+                  <div className="upload-list">
+                    {bulkUploads.map((u) => {
+                      const pct = u.validation_details?.completeness_percentage ?? null;
+                      const status = u.validation_status || "unknown";
 
-                  {!bulkUploads.length ? (
-                    <p style={{ color: "#64748b", fontSize: 14 }}>
-                      No course folders uploaded yet for this course.
-                    </p>
-                  ) : (
-                    <div className="upload-list">
-                      {bulkUploads.map((u) => {
-                        const pct =
-                          u.validation_details?.completeness_percentage ?? null;
-                        const status = u.validation_status || "unknown";
-                        let statusColor = "#64748b";
-                        if (status === "complete") statusColor = "#16a34a";
-                        else if (status === "incomplete") statusColor = "#eab308";
-                        else if (status === "invalid") statusColor = "#ef4444";
-
-                        return (
-                          <div
-                            key={u.id}
-                            className="upload-list-item"
-                            style={{
-                              display: "flex",
-                              justifyContent: "space-between",
-                              alignItems: "center",
-                              padding: "8px 0",
-                              borderBottom: "1px solid #e2e8f0",
-                            }}
-                          >
-                            <div
-                              style={{
-                                display: "flex",
-                                alignItems: "center",
-                                gap: 8,
-                              }}
-                            >
-                              <DocumentIcon className="w-4 h-4 text-slate-400" />
-                              <div>
-                                <div style={{ fontSize: 13, fontWeight: 500 }}>
-                                  {u.filename}
-                                </div>
-                                <div style={{ fontSize: 11, color: "#64748b" }}>
-                                  {u.upload_date
-                                    ? new Date(u.upload_date).toLocaleString()
-                                    : ""}
-                                </div>
+                      return (
+                        <div key={u.id} className="upload-item">
+                          <div className="upload-left">
+                            <DocumentIcon />
+                            <div>
+                              <div className="upload-name">{u.filename}</div>
+                              <div className="upload-date">
+                                {u.upload_date ? new Date(u.upload_date).toLocaleString() : ""}
                               </div>
                             </div>
-                            <div
-                              style={{
-                                display: "flex",
-                                flexDirection: "column",
-                                alignItems: "flex-end",
-                                gap: 4,
-                              }}
-                            >
-                              <span
-                                style={{
-                                  fontSize: 11,
-                                  padding: "2px 8px",
-                                  borderRadius: 999,
-                                  border: `1px solid ${statusColor}`,
-                                  color: statusColor,
-                                  textTransform: "capitalize",
-                                }}
-                              >
-                                {status}
-                              </span>
-                              {pct !== null && (
-                                <span style={{ fontSize: 11, color: "#64748b" }}>
-                                  Completeness: {pct}%
-                                </span>
-                              )}
-                            </div>
                           </div>
-                        );
-                      })}
-                    </div>
+
+                          <div className="upload-right">
+                            <span className={`status-badge2 ${status}`}>{status}</span>
+                            {pct !== null && <span className="tiny">Completeness: {pct}%</span>}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </>
+            )}
+
+            {/* ===================== TAB: GUIDE ===================== */}
+            {activeTab === "guide" && selectedCourse && (
+              <>
+                <SectionTitle title="Upload Course Guide" subtitle="Upload the official course guide (drives weekly execution monitoring)." />
+                <div className="row" style={{ gap: 12, flexWrap: "wrap" }}>
+                  <input
+                    type="file"
+                    onChange={(e) => setGuideFile(e.target.files?.[0] || null)}
+                    disabled={!canUploadMaterials || guideUploading}
+                  />
+                  <button
+                    type="button"
+                    className="btn-primary"
+                    onClick={handleUploadCourseGuide}
+                    disabled={!canUploadMaterials || guideUploading || !guideFile}
+                  >
+                    {guideUploading ? "Uploading..." : "Upload Course Guide"}
+                  </button>
+                  {!canUploadMaterials && (
+                    <span style={{ fontSize: 13, color: "#9a3412" }}>Upload disabled for your role.</span>
                   )}
                 </div>
-              </div>
-            </div>
-          )}
-        </>
-      )}
+              </>
+            )}
+
+            {/* ===================== TAB: LECTURES ===================== */}
+            {activeTab === "lectures" && selectedCourse && (
+              <>
+                {executionStatus && (
+                  <div
+                    style={{
+                      background: executionStatus.is_on_track ? "#ecfdf5" : "#fff7ed",
+                      border: `1px solid ${executionStatus.is_on_track ? "#bbf7d0" : "#fed7aa"}`,
+                      padding: 12,
+                      borderRadius: 12,
+                      marginBottom: 12,
+                      color: executionStatus.is_on_track ? "#166534" : "#9a3412",
+                      fontSize: 13,
+                    }}
+                  >
+                    <strong>{executionStatus.is_on_track ? "On Track ✅" : "Deviation Detected ⚠️"}</strong>
+                    <div style={{ marginTop: 6 }}>
+                      Missing Weeks:{" "}
+                      <strong>
+                        {executionStatus.missing_weeks?.length ? executionStatus.missing_weeks.join(", ") : "None"}
+                      </strong>
+                    </div>
+                  </div>
+                )}
+
+                <SectionTitle title="Upload Weekly Lecture" subtitle="Upload lectures week-wise and track execution status." />
+
+                <div className="row" style={{ gap: 12, flexWrap: "wrap", alignItems: "end" }}>
+                  <div>
+                    <label className="small-label">Week</label>
+                    <select
+                      className="form-input"
+                      value={lectureWeek}
+                      onChange={(e) => setLectureWeek(Number(e.target.value))}
+                      style={{ width: 160 }}
+                    >
+                      {Array.from({ length: 16 }).map((_, i) => (
+                        <option key={i} value={i + 1}>
+                          Week {i + 1}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="small-label">Lecture File</label>
+                    <input
+                      type="file"
+                      onChange={(e) => setLectureFile(e.target.files?.[0] || null)}
+                      disabled={!canUploadMaterials || lectureUploading}
+                    />
+                  </div>
+
+                  <button
+                    type="button"
+                    className="btn-primary"
+                    onClick={handleUploadWeeklyLecture}
+                    disabled={!canUploadMaterials || lectureUploading || !lectureFile}
+                  >
+                    {lectureUploading ? "Uploading..." : "Upload Lecture"}
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      </div>
 
       {/* ------------ Add Material Side Panel ------------ */}
       {isPanelOpen && (
@@ -1031,18 +948,11 @@ export default function CourseFolder({ user }) {
                 <h2>Add Material</h2>
                 <p>
                   Upload file(s) for{" "}
-                  {(FOLDERS.find((f) => f.key === activeFolder) || {}).label ||
-                    "this course"}
-                  .
+                  {(FOLDERS.find((f) => f.key === activeFolder) || {}).label || "this course"}.
                 </p>
               </div>
-              <button
-                type="button"
-                className="icon-button"
-                onClick={closePanel}
-                disabled={isSaving}
-              >
-                <XMarkIcon className="w-5 h-5" />
+              <button type="button" className="icon-button" onClick={closePanel} disabled={isSaving}>
+                <XMarkIcon />
               </button>
             </div>
 
@@ -1074,10 +984,9 @@ export default function CourseFolder({ user }) {
               <label className="field-label" style={{ marginTop: 16 }}>
                 Attach Files
               </label>
+
               <div
-                className={`material-dropzone ${
-                  dragActive ? "material-dropzone-active" : ""
-                }`}
+                className={`material-dropzone ${dragActive ? "material-dropzone-active" : ""}`}
                 onDragOver={(e) => {
                   e.preventDefault();
                   setDragActive(true);
@@ -1094,18 +1003,9 @@ export default function CourseFolder({ user }) {
                   setMaterialFiles((prev) => [...prev, ...files]);
                 }}
               >
-                <CloudArrowUpIcon className="w-8 h-8 text-slate-400" />
-                <p style={{ marginTop: 8, fontWeight: 500 }}>
-                  Drag & drop files here
-                </p>
-                <p
-                  style={{
-                    fontSize: 12,
-                    color: "#64748b",
-                    marginTop: 4,
-                    marginBottom: 8,
-                  }}
-                >
+                <CloudArrowUpIcon />
+                <p style={{ marginTop: 8, fontWeight: 800 }}>Drag & drop files here</p>
+                <p style={{ fontSize: 12, color: "#64748b", marginTop: 4, marginBottom: 8 }}>
                   or click the button below to browse
                 </p>
                 <label className="browse-button">
@@ -1128,20 +1028,14 @@ export default function CourseFolder({ user }) {
                 <div className="material-selected-files">
                   {materialFiles.map((f, idx) => (
                     <div key={idx} className="material-selected-file-row">
-                      <div style={{ display: "flex", alignItems: "center" }}>
-                        <DocumentIcon className="w-4 h-4 text-slate-400" />
-                        <span style={{ marginLeft: 6, fontSize: 13 }}>
-                          {f.name}
-                        </span>
+                      <div className="row" style={{ gap: 8 }}>
+                        <DocumentIcon />
+                        <span style={{ fontSize: 13 }}>{f.name}</span>
                       </div>
                       <button
                         type="button"
                         className="file-remove-btn"
-                        onClick={() =>
-                          setMaterialFiles((prev) =>
-                            prev.filter((_, i) => i !== idx)
-                          )
-                        }
+                        onClick={() => setMaterialFiles((prev) => prev.filter((_, i) => i !== idx))}
                         disabled={isSaving}
                       >
                         Remove
@@ -1153,20 +1047,10 @@ export default function CourseFolder({ user }) {
             </div>
 
             <div className="material-panel-footer">
-              <button
-                type="button"
-                className="btn-primary"
-                onClick={handleSaveMaterial}
-                disabled={isSaving}
-              >
+              <button type="button" className="btn-primary" onClick={handleSaveMaterial} disabled={isSaving}>
                 {isSaving ? "Saving..." : "Save"}
               </button>
-              <button
-                type="button"
-                className="btn-ghost"
-                onClick={closePanel}
-                disabled={isSaving}
-              >
+              <button type="button" className="btn-ghost" onClick={closePanel} disabled={isSaving}>
                 Cancel
               </button>
             </div>

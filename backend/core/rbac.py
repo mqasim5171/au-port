@@ -1,5 +1,5 @@
 # backend/core/rbac.py
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from core.db import SessionLocal
@@ -25,10 +25,15 @@ def norm_role(r: str) -> str:
     return x
 
 
+# ✅ Safe wrapper you can reuse anywhere (analysis, etc.)
+def _get_current_user_safe(current=Depends(get_current_user)):
+    return current
+
+
 def require_roles(*allowed_roles: str):
     allowed = {norm_role(x) for x in allowed_roles}
 
-    def dep(current=Depends(get_current_user)):
+    def dep(current=Depends(_get_current_user_safe)):
         if norm_role(getattr(current, "role", "")) not in allowed:
             raise HTTPException(status_code=403, detail="Not authorized for this action")
         return current
@@ -38,7 +43,7 @@ def require_roles(*allowed_roles: str):
 
 def require_course_access(
     course_id: str,
-    current=Depends(get_current_user),
+    current=Depends(_get_current_user_safe),
     db: Session = Depends(get_db),
 ):
     r = norm_role(getattr(current, "role", ""))
@@ -74,7 +79,7 @@ def require_course_access(
 
 def require_course_lead_or_higher(
     course_id: str,
-    current=Depends(get_current_user),
+    current=Depends(_get_current_user_safe),
     db: Session = Depends(get_db),
 ):
     r = norm_role(getattr(current, "role", ""))
