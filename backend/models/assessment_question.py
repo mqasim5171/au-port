@@ -1,32 +1,28 @@
 # backend/models/assessment_question.py
 
 import uuid
-from sqlalchemy import Column, Integer, ForeignKey, Text
+from sqlalchemy import Column, String, Integer, ForeignKey
+from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
-from sqlalchemy.dialects.postgresql import UUID   # ✅ THIS IS THE RIGHT UUID
 from core.db import Base
 
 
 class AssessmentQuestion(Base):
     __tablename__ = "assessment_questions"
 
-    id = Column(
-        UUID(as_uuid=True),     # ✅ SQLAlchemy UUID
-        primary_key=True,
-        default=uuid.uuid4
-    )
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
 
     assessment_id = Column(
-        UUID(as_uuid=True),     # ✅ SQLAlchemy UUID
+        UUID(as_uuid=True),
         ForeignKey("assessments.id", ondelete="CASCADE"),
         nullable=False
     )
 
-    label = Column(Integer, nullable=False)  # or String if you prefer "Q1"
-    max_marks = Column(Integer, nullable=False)
-    text = Column(Text, nullable=True)
+    question_text = Column(String, nullable=False)
+    marks = Column(Integer, nullable=False)
 
-    clos = relationship(
+    # ✅ FIXED relationship
+    question_clos = relationship(
         "QuestionCLO",
         back_populates="question",
         cascade="all, delete-orphan"

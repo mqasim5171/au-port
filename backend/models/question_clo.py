@@ -1,7 +1,7 @@
 # backend/models/question_clo.py
 
 import uuid
-from sqlalchemy import Column, ForeignKey, Float
+from sqlalchemy import Column, ForeignKey
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
 from core.db import Base
@@ -14,14 +14,18 @@ class QuestionCLO(Base):
 
     question_id = Column(
         UUID(as_uuid=True),
-        ForeignKey("assessment_questions.id", ondelete="CASCADE")
+        ForeignKey("assessment_questions.id", ondelete="CASCADE"),
+        nullable=False
     )
 
     clo_id = Column(
         UUID(as_uuid=True),
-        ForeignKey("course_clos.id", ondelete="CASCADE")
+        ForeignKey("course_clos.id", ondelete="CASCADE"),
+        nullable=False
     )
 
-    weight_percent = Column(Float, nullable=True)
-
-    question = relationship("AssessmentQuestion", back_populates="clos")
+    # ✅ FIXED relationship
+    question = relationship(
+        "AssessmentQuestion",
+        back_populates="question_clos"
+    )

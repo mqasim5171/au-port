@@ -6,12 +6,8 @@ from datetime import datetime, timezone, date
 from sqlalchemy import String, Integer, Date, DateTime, Table, Column, ForeignKey
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
- # ✅ IMPORTANT (this fixes your NameError)
 from core.db import Base
 
-
-
-# ✅ Association table MUST be defined before the relationship uses it
 assessment_clos = Table(
     "assessment_clos",
     Base.metadata,
@@ -26,6 +22,7 @@ class Assessment(Base):
         UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
     )
 
+    # ✅ Match your DB column type (UUID)
     course_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), index=True, nullable=False
     )

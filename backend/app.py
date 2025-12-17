@@ -1,14 +1,11 @@
-# app.py
+# backend/app.py
 import os
-
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+
 from core.db import init_db
 from core.schema_guard import ensure_all_tables_once
-from routers.execution_status import router as execution_status_router
 
-
-from routers.analysis import router as analysis_router
 from routers import (
     auth,
     users,
@@ -26,19 +23,25 @@ from routers import (
     student_router,
     grading_audit_router,
     suggestions,
+    course_guide,
+    lectures,
+    assessment_questions,
+    analysis,
+    execution_status,
 )
 
 app = FastAPI(title="Air QA Backend")
+
+# ✅ Initialize DB
 init_db()
 
-
-# -------------------- CORS --------------------
-FRONTEND_URL = os.getenv("FRONTEND_URL", "").strip()  # optional (Netlify)
+# ✅ CORS — MUST be added before heavy routing issues show up in browser
+FRONTEND_URL = os.getenv("FRONTEND_URL", "").strip()
 
 ALLOWED_ORIGINS = [
     "http://localhost:3000",
     "http://127.0.0.1:3000",
-    "http://localhost:3001",   # ✅ your CRA dev server
+    "http://localhost:3001",
     "http://127.0.0.1:3001",
 ]
 
@@ -48,11 +51,10 @@ if FRONTEND_URL:
 app.add_middleware(
     CORSMiddleware,
     allow_origins=ALLOWED_ORIGINS,
-    allow_credentials=False,     # ✅ JWT via Authorization header (no cookies)
+    allow_credentials=True,        # ✅ safe for tokens too
     allow_methods=["*"],
-    allow_headers=["*"],         # ✅ includes Authorization
+    allow_headers=["*"],
 )
-# ----------------------------------------------
 
 # -------------------- Routers -----------------
 app.include_router(auth.router)
@@ -66,16 +68,26 @@ app.include_router(clo_alignment.router)
 app.include_router(health.router)
 app.include_router(dashboard.router)
 app.include_router(student_feedback.router)
+
+# Course execution
 app.include_router(course_execution.router)
+app.include_router(execution_status.router)
+
+# Assessments
 app.include_router(assessment_router.router)
-app.include_router(student_router.router)
+app.include_router(assessment_questions.router)
 app.include_router(grading_audit_router.router)
+
+# Course guide + lectures
+app.include_router(course_guide.router)
+app.include_router(lectures.router)
+
+# Students + suggestions
+app.include_router(student_router.router)
 app.include_router(suggestions.router)
 
-app.include_router(analysis_router)
-
-app.include_router(execution_status_router)
-
+# Analysis
+app.include_router(analysis.router)
 # ----------------------------------------------
 
 
