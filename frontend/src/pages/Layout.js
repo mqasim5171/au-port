@@ -10,9 +10,10 @@ import {
   DocumentTextIcon,
   ArrowRightOnRectangleIcon,
   ChartBarIcon,
-  Cog6ToothIcon,       // Admin
-  AcademicCapIcon,     // Course Guide
-  ArrowUpTrayIcon,     // ✅ Weekly Upload
+  Cog6ToothIcon, // Admin
+  AcademicCapIcon, // Course Guide
+  ArrowUpTrayIcon, // Weekly Upload
+  ClipboardDocumentListIcon, // ✅ Assessments
 } from "@heroicons/react/24/outline";
 
 import api from "../api";
@@ -41,6 +42,12 @@ const Layout = ({ user: userProp, onLogout }) => {
       roleLower.includes("faculty")
     );
   }, [roleLower, isAdmin]);
+
+  // ✅ can access assessments (you can tighten this later)
+  const canAssess = useMemo(
+    () => isAdmin || isCourseLead || isInstructor,
+    [isAdmin, isCourseLead, isInstructor]
+  );
 
   // Rehydrate user if refresh
   useEffect(() => {
@@ -78,6 +85,10 @@ const Layout = ({ user: userProp, onLogout }) => {
         ? [{ name: "Weekly Upload", href: "/weekly-upload", icon: ArrowUpTrayIcon }]
         : []),
 
+      ...(canAssess
+        ? [{ name: "Assessments", href: "/assessments", icon: ClipboardDocumentListIcon }]
+        : []),
+
       { name: "Course Folder", href: "/course-folder", icon: FolderIcon },
       { name: "CLO Alignment", href: "/clo-alignment", icon: DocumentCheckIcon },
       { name: "Students Feedback", href: "/student-feedback", icon: ChatBubbleLeftRightIcon },
@@ -85,13 +96,15 @@ const Layout = ({ user: userProp, onLogout }) => {
       { name: "Reports", href: "/reports", icon: DocumentTextIcon },
       { name: "Execution Monitor", href: "/execution", icon: ChartBarIcon },
     ];
-  }, [isAdmin, isCourseLead, isInstructor]);
+  }, [isAdmin, isCourseLead, isInstructor, canAssess]);
 
   const isActive = (href) =>
     location.pathname === href || location.pathname.startsWith(href + "/");
 
   const handleLogout = () => {
-    try { if (onLogout) onLogout(); } catch {}
+    try {
+      if (onLogout) onLogout();
+    } catch {}
     localStorage.removeItem("token");
     navigate("/login");
   };

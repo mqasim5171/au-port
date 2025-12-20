@@ -1,22 +1,23 @@
-# models/student_submission.py
+# backend/models/student_submission.py
 import uuid
 from datetime import datetime, timezone
 
+from sqlalchemy import String, DateTime, ForeignKey, Float, Text
+from sqlalchemy.dialects.postgresql import UUID, JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
-from sqlalchemy import String, Integer, DateTime, ForeignKey
-from sqlalchemy.dialects.postgresql import UUID
 
 from core.base import Base
 
-def gen_id() -> str:
-    return str(uuid.uuid4())
+
+def utcnow():
+    return datetime.now(timezone.utc)
+
 
 class StudentSubmission(Base):
     __tablename__ = "student_submissions"
 
-    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=gen_id)
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
 
-    # ✅ MUST match assessments.id (UUID)
     assessment_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("assessments.id", ondelete="CASCADE"),
@@ -24,6 +25,7 @@ class StudentSubmission(Base):
         nullable=False,
     )
 
+    # your Student.id is String(36)
     student_id: Mapped[str] = mapped_column(
         String(36),
         ForeignKey("students.id", ondelete="CASCADE"),
@@ -31,15 +33,22 @@ class StudentSubmission(Base):
         nullable=False,
     )
 
-    file_upload_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
-    obtained_marks: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    grader_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
-
-    submitted_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True),
-        default=lambda: datetime.now(timezone.utc),
-        nullable=False,
+    # ✅ Upload.id is UUID
+    upload_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("uploads.id", ondelete="SET NULL"),
+        nullable=True,
     )
 
-    assessment = relationship("Assessment")
-    student = relationship("Student")
+    status: Mapped[str] = mapped_column(String(30), default="uploaded", nullable=False)
+
+    ai_marks: Mapped[float | None] = mapped_column(Float, nullable=True)
+    ai_feedback: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    evidence_json: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
+
+    # relationships
+    assessment = relationship("Assessment", back_populates="submissions")
+    student = relationship("Student", back_populates="submissions")

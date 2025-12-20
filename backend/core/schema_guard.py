@@ -1,17 +1,14 @@
 # backend/core/schema_guard.py
 from sqlalchemy.exc import OperationalError
-from sqlalchemy import inspect
 from core.db import engine
 from core.base import Base
-from models.course_staff import CourseStaff  # noqa: F401
-from models.course_staff import CourseStaff  # noqa
-from models.course_execution import WeeklyPlan  # noqa: F401
-   # noqa
 
-import models.suggestion
-from models import user, course, file_upload, feedback, course_execution  # noqa
+# ✅ import models so metadata knows them
+from models import user, course, uploads, course_execution  # noqa: F401
+from models import assessment, student, student_submission  # noqa: F401
 
 _initialized = False
+
 
 def ensure_all_tables_once():
     global _initialized
@@ -22,6 +19,5 @@ def ensure_all_tables_once():
         Base.metadata.create_all(bind=engine)  # creates only missing tables
         _initialized = True
     except OperationalError as e:
-        # DB not reachable (DNS / network / SG), don't kill the server in dev
         print("⚠️ Database not reachable, skipping schema creation.")
         print(e)

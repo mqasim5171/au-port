@@ -5,7 +5,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from core.schema_guard import ensure_all_tables_once
-
+from routers import assessments
 from routers import (
     auth,
     admin,
@@ -20,7 +20,7 @@ from routers import (
     course_clo,
     student_feedback,
     course_execution,
-    assessment_router,
+    
     student_router,
     grading_audit_router,
     suggestions,
@@ -62,13 +62,13 @@ app.include_router(clo_alignment.router)
 app.include_router(health.router)
 app.include_router(dashboard.router)
 app.include_router(student_feedback.router)
-app.include_router(assessment_router.router)
+
 app.include_router(student_router.router)
 app.include_router(grading_audit_router.router)
 app.include_router(suggestions.router)
 app.include_router(admin.router)
 app.include_router(course_lead.router)
-
+app.include_router(assessments.router, prefix="/api") 
 # ✅ IMPORTANT: expose execution endpoints under /execution
 # This makes your frontend URL work:
 #   /execution/courses/{courseId}/weeks/{weekNo}/weekly-zip

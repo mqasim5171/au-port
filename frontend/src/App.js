@@ -13,9 +13,9 @@ import CourseExecutionMonitor from "./pages/CourseExecutionMonitor";
 import Admin from "./pages/Admin";
 import CourseGuideUpload from "./pages/CourseGuideUpload";
 import WeeklyUpload from "./pages/WeeklyUpload";
-
+import Assessments from "./pages/Assessments";
 import CourseAssessments from "./pages/CourseAssessments";
-import AssessmentDetail from "./pages/AssessmentDetail";
+import AssessmentDetail from "./pages/Assessments";
 
 import api from "./api";
 
@@ -76,6 +76,8 @@ function App() {
               <Route path="/course-folder" element={<CourseFolder />} />
 
               <Route path="/weekly-upload" element={<WeeklyUpload />} />
+              <Route path="/assessments" element={<Assessments />} />
+              <Route path="/assessments/:id" element={<AssessmentDetail />} />
 
 
               <Route path="/course-guide" element={<CourseGuideUpload user={user} />} />
