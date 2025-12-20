@@ -2,7 +2,9 @@
 import os
 from pathlib import Path
 from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker, declarative_base  # ✅ add declarative_base
+from sqlalchemy.orm import sessionmaker
+
+from core.base import Base  # ✅ single source of truth
 
 # --- Load .env from the backend directory ---
 try:
@@ -13,11 +15,8 @@ except Exception:
     pass
 
 DB_URL = os.getenv("DATABASE_URL")
-
 if not DB_URL:
-    raise RuntimeError(
-        "DATABASE_URL is not set. Ensure backend/.env exists and launch with the project's venv."
-    )
+    raise RuntimeError("DATABASE_URL is not set. Ensure backend/.env exists.")
 
 connect_args = {}
 if DB_URL.startswith("postgresql+"):
@@ -30,12 +29,7 @@ engine = create_engine(
     connect_args=connect_args,
 )
 
-print("DB_URL:", DB_URL)
-
 SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False, future=True)
-
-# ✅ add this
-Base = declarative_base()
 
 def get_db():
     db = SessionLocal()

@@ -10,9 +10,12 @@ import StudentFeedback from "./pages/StudentFeedback";
 import Suggestions from "./pages/Suggestions";
 import Reports from "./pages/Reports";
 import CourseExecutionMonitor from "./pages/CourseExecutionMonitor";
+import Admin from "./pages/Admin";
+import CourseGuideUpload from "./pages/CourseGuideUpload";
+import WeeklyUpload from "./pages/WeeklyUpload";
 
-import CourseAssessments from "./pages/CourseAssessments";   // ✅ NEW
-import AssessmentDetail from "./pages/AssessmentDetail";     // ✅ Ensure used
+import CourseAssessments from "./pages/CourseAssessments";
+import AssessmentDetail from "./pages/AssessmentDetail";
 
 import api from "./api";
 
@@ -37,7 +40,6 @@ function App() {
         });
         setUser(me.data);
       } catch {
-        // Bad/expired token: clear and stay logged out
         localStorage.removeItem("token");
         delete api.defaults.headers.common.Authorization;
         setUser(null);
@@ -73,11 +75,17 @@ function App() {
               <Route path="/dashboard" element={<Dashboard />} />
               <Route path="/course-folder" element={<CourseFolder />} />
 
-              {/* ✅ NEW: Assessments routes */}
-              <Route
-                path="/courses/:courseId/assessments"
-                element={<CourseAssessments />}
-              />
+              <Route path="/weekly-upload" element={<WeeklyUpload />} />
+
+
+              <Route path="/course-guide" element={<CourseGuideUpload user={user} />} />
+
+
+              {/* ✅ Admin page (Layout shows link only for admins) */}
+              <Route path="/admin" element={<Admin user={user} />} />
+
+              {/* ✅ Assessments routes */}
+              <Route path="/courses/:courseId/assessments" element={<CourseAssessments />} />
               <Route path="/assessments/:id" element={<AssessmentDetail />} />
 
               <Route path="/clo-alignment" element={<CLOAlignment />} />

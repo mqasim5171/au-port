@@ -1,66 +1,105 @@
-// src/layout/Layout.js
-import React, { useEffect, useState } from 'react';
-import { Outlet, Link, useLocation, useNavigate } from 'react-router-dom';
-import { 
-  HomeIcon, 
-  FolderIcon, 
+// src/pages/Layout.js
+import React, { useEffect, useMemo, useState } from "react";
+import { Outlet, Link, useLocation, useNavigate } from "react-router-dom";
+import {
+  HomeIcon,
+  FolderIcon,
   DocumentCheckIcon,
   ChatBubbleLeftRightIcon,
   LightBulbIcon,
   DocumentTextIcon,
   ArrowRightOnRectangleIcon,
-  ChartBarIcon,          // ✅ NEW: icon for Execution Monitor
-} from '@heroicons/react/24/outline';
-import api from '../api';
-import '../App.css';
+  ChartBarIcon,
+  Cog6ToothIcon,       // Admin
+  AcademicCapIcon,     // Course Guide
+  ArrowUpTrayIcon,     // ✅ Weekly Upload
+} from "@heroicons/react/24/outline";
+
+import api from "../api";
+import "../App.css";
 
 const Layout = ({ user: userProp, onLogout }) => {
   const location = useLocation();
   const navigate = useNavigate();
-  const [user, setUser] = useState(userProp || null);
 
-  // If we reload the app and lose in-memory user, fetch from /api/profile using the stored token
+  const [user, setUser] = useState(userProp || null);
+  const roleLower = (user?.role || "").toLowerCase();
+
+  // ✅ Role flags
+  const isAdmin = useMemo(() => roleLower.includes("admin"), [roleLower]);
+
+  const isCourseLead = useMemo(
+    () => roleLower.includes("course_lead") || isAdmin,
+    [roleLower, isAdmin]
+  );
+
+  const isInstructor = useMemo(() => {
+    // include faculty/instructor; admin also allowed
+    return (
+      isAdmin ||
+      roleLower.includes("instructor") ||
+      roleLower.includes("faculty")
+    );
+  }, [roleLower, isAdmin]);
+
+  // Rehydrate user if refresh
   useEffect(() => {
-    const token = localStorage.getItem('token');
+    const token = localStorage.getItem("token");
     if (!token) {
-      navigate('/login');
+      navigate("/login");
       return;
     }
-    if (!userProp) {
-      api.get('/profile')
-        .then(res => setUser(res.data))
-        .catch(() => {
-          // token might be invalid/expired
-          localStorage.removeItem('token');
-          navigate('/login');
-        });
+
+    if (userProp) {
+      setUser(userProp);
+      return;
     }
+
+    api
+      .get("/auth/me")
+      .then((res) => setUser(res.data))
+      .catch(() => {
+        localStorage.removeItem("token");
+        navigate("/login");
+      });
   }, [userProp, navigate]);
 
-  const navigation = [
-    { name: 'Dashboard', href: '/dashboard', icon: HomeIcon },
-    { name: 'Course Folder', href: '/course-folder', icon: FolderIcon },
-    { name: 'CLO Alignment', href: '/clo-alignment', icon: DocumentCheckIcon },
-    { name: 'Students Feedback', href: '/student-feedback', icon: ChatBubbleLeftRightIcon },
-    { name: 'Suggestions', href: '/suggestions', icon: LightBulbIcon },
-    { name: 'Reports', href: '/reports', icon: DocumentTextIcon },
-    // ✅ NEW: Course Execution Monitor link
-    { name: 'Execution Monitor', href: '/execution', icon: ChartBarIcon },
-  ];
+  const navigation = useMemo(() => {
+    return [
+      { name: "Dashboard", href: "/dashboard", icon: HomeIcon },
 
-  // Active if current path starts with the item path (so nested routes highlight too)
-  const isActive = (href) => location.pathname === href || location.pathname.startsWith(href + '/');
+      ...(isAdmin ? [{ name: "Admin", href: "/admin", icon: Cog6ToothIcon }] : []),
+
+      ...(isCourseLead
+        ? [{ name: "Course Guide", href: "/course-guide", icon: AcademicCapIcon }]
+        : []),
+
+      ...(isInstructor
+        ? [{ name: "Weekly Upload", href: "/weekly-upload", icon: ArrowUpTrayIcon }]
+        : []),
+
+      { name: "Course Folder", href: "/course-folder", icon: FolderIcon },
+      { name: "CLO Alignment", href: "/clo-alignment", icon: DocumentCheckIcon },
+      { name: "Students Feedback", href: "/student-feedback", icon: ChatBubbleLeftRightIcon },
+      { name: "Suggestions", href: "/suggestions", icon: LightBulbIcon },
+      { name: "Reports", href: "/reports", icon: DocumentTextIcon },
+      { name: "Execution Monitor", href: "/execution", icon: ChartBarIcon },
+    ];
+  }, [isAdmin, isCourseLead, isInstructor]);
+
+  const isActive = (href) =>
+    location.pathname === href || location.pathname.startsWith(href + "/");
 
   const handleLogout = () => {
     try { if (onLogout) onLogout(); } catch {}
-    localStorage.removeItem('token');
-    navigate('/login');
+    localStorage.removeItem("token");
+    navigate("/login");
   };
 
   const initial =
     (user?.full_name?.trim?.()[0]) ||
     (user?.username?.trim?.()[0]) ||
-    'U';
+    "U";
 
   return (
     <div className="layout-container">
@@ -77,7 +116,7 @@ const Layout = ({ user: userProp, onLogout }) => {
               <Link
                 key={item.name}
                 to={item.href}
-                className={`nav-item ${isActive(item.href) ? 'active' : ''}`}
+                className={`nav-item ${isActive(item.href) ? "active" : ""}`}
               >
                 <Icon className="nav-icon" />
                 {item.name}
@@ -90,16 +129,16 @@ const Layout = ({ user: userProp, onLogout }) => {
           <div className="user-info">
             <div className="user-avatar">{initial}</div>
             <div className="user-details">
-              <h4>{user?.full_name || user?.username || 'User'}</h4>
+              <h4>{user?.full_name || user?.username || "User"}</h4>
               <p>
-                {(user?.role || 'user')}
-                {user?.department ? ` • ${user.department}` : ''}
+                {user?.role || "user"}
+                {user?.department ? ` • ${user.department}` : ""}
               </p>
             </div>
           </div>
 
           <button onClick={handleLogout} className="btn-logout">
-            <ArrowRightOnRectangleIcon style={{ width: '16px', marginRight: '8px' }} />
+            <ArrowRightOnRectangleIcon style={{ width: "16px", marginRight: "8px" }} />
             Logout
           </button>
         </div>

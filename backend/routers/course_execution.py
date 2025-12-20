@@ -1,7 +1,9 @@
 # backend/routers/course_execution.py
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
 from sqlalchemy.orm import Session
 from typing import List
+
+from services.weekly_zip_upload_service import handle_weekly_zip_upload
 
 from core.db import SessionLocal
 from .auth import get_current_user
@@ -45,7 +47,6 @@ def generate_weekly_plan(
         raise HTTPException(status_code=404, detail="Course not found")
 
     plans = generate_weekly_plan_from_guide(db, course, guide_text)
-    # recompute deviations (empty execution at this stage)
     update_deviations_for_course(db, course_id)
     return plans
 
@@ -110,10 +111,7 @@ def upsert_weekly_execution(
     )
 
     if exec_obj is None:
-        exec_obj = WeeklyExecution(
-            course_id=course_id,
-            week_number=week_number,
-        )
+        exec_obj = WeeklyExecution(course_id=course_id, week_number=week_number)
 
     for field, value in payload.model_dump(exclude_unset=True).items():
         setattr(exec_obj, field, value)
@@ -166,7 +164,6 @@ def weekly_status_summary(
         plan = plans.get(w)
         exe = execs.get(w)
 
-        # decide status (simple)
         if exe:
             status_val = exe.coverage_status
         elif plan:
@@ -227,3 +224,37 @@ def resolve_deviation(
     db.commit()
     db.refresh(dev)
     return dev
+
+
+# ✅ WEEKLY ZIP UPLOAD (Instructor)
+@router.post("/{course_id}/weeks/{week_no}/weekly-zip")
+async def upload_weekly_zip(
+    course_id: str,
+    week_no: int,
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    current=Depends(get_current_user),
+):
+    role = (current.get("role") if isinstance(current, dict) else getattr(current, "role", "")) or ""
+    role_l = role.lower()
+
+    if not any(k in role_l for k in ["instructor", "faculty", "admin"]):
+        raise HTTPException(status_code=403, detail="Only instructor/faculty/admin can upload weekly zip.")
+
+    if week_no < 1 or week_no > 16:
+        raise HTTPException(status_code=400, detail="week_no must be 1..16")
+
+    data = await file.read()
+    if not data:
+        raise HTTPException(status_code=400, detail="Empty file uploaded")
+
+    user_id = current["id"] if isinstance(current, dict) else str(current.id)
+
+    return handle_weekly_zip_upload(
+        db=db,
+        course_id=course_id,
+        week_no=week_no,
+        user_id=user_id,
+        zip_file_bytes=data,
+        zip_filename=file.filename or f"week_{week_no}.zip",
+    )

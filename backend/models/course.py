@@ -2,14 +2,19 @@
 import uuid
 from datetime import datetime, timezone
 from sqlalchemy.orm import Mapped, mapped_column, relationship
-from sqlalchemy import String, Text, DateTime
+
 from core.base import Base
+from sqlalchemy import Column, String, Integer, Text ,DateTime
+
 
 def gen_id() -> str:
     return str(uuid.uuid4())
 
 class Course(Base):
     __tablename__ = "courses"
+
+    course_guide_path = Column(String(255), nullable=True)
+    course_guide_text = Column(Text, nullable=True)
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=gen_id)
     course_code: Mapped[str] = mapped_column(String(50))
