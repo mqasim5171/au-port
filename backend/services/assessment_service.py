@@ -10,6 +10,7 @@ from models.uploads import Upload, UploadText
 from models.assessment import Assessment, AssessmentFile, AssessmentExpectedAnswers, AssessmentCLOAlignment
 from services.upload_adapter import parse_document
 from services.openrouter_client import call_openrouter_json
+from datetime import datetime, timezone, date as dt_date
 
 
 ALLOWED_Q_EXTS = {".pdf", ".docx"}
@@ -42,20 +43,15 @@ def _read_prompt(rel_path: str) -> str:
 
 
 def create_assessment(db: Session, course_id: str, payload: Dict[str, Any], created_by: str) -> Assessment:
-    # ✅ weightage required; still guard against None
-    weightage = payload.get("weightage")
+    # ✅ ensure not-null DB fields are always set
+    weightage = payload.get("weightage", None)
     if weightage is None:
-        # You can also raise ValueError here; but default prevents 500
         weightage = 0
 
-    # ✅ date required; still guard against None
-    d = payload.get("date")
-    if d is None:
-        d = dt_date.today()
-
-    # If somehow a datetime slipped in, convert to date
-    if isinstance(d, datetime):
-        d = d.date()
+    raw_date = payload.get("date")
+    if raw_date is None:
+        # fallback to today if frontend didn't send
+        raw_date = dt_date.today()
 
     a = Assessment(
         course_id=course_id,
@@ -63,15 +59,15 @@ def create_assessment(db: Session, course_id: str, payload: Dict[str, Any], crea
         title=payload["title"],
         max_marks=int(payload.get("max_marks") or 0),
         weightage=int(weightage),
-        date=d,
+        date=raw_date,
         created_by=created_by,
         created_at=utcnow(),
     )
-
     db.add(a)
     db.commit()
     db.refresh(a)
     return a
+
 
 def save_questions_file_and_extract_text(
     db: Session,

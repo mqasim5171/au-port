@@ -45,17 +45,23 @@ def create_assessment_api(
     db: Session = Depends(get_db),
     current=Depends(get_current_user),
 ):
-    # ✅ Course PK is UUID
+    # ✅ validate UUID format BUT store/use as string (because DB is varchar(36))
     try:
-        course_uuid = uuid.UUID(course_id)
+        uuid.UUID(course_id)
     except Exception:
-        raise HTTPException(status_code=400, detail="Invalid course_id (must be UUID)")
+        raise HTTPException(status_code=400, detail="Invalid course_id (must be UUID format)")
 
-    course = db.get(Course, course_uuid)
+    # ✅ courses.id in DB is varchar => db.get expects string
+    course = db.get(Course, course_id)
     if not course:
         raise HTTPException(status_code=404, detail="Course not found")
 
-    a = create_assessment(db, str(course_uuid), payload.model_dump(), created_by=_uid(current))
+    a = create_assessment(
+        db,
+        course_id=course_id,                 # ✅ string
+        payload=payload.model_dump(),
+        created_by=_uid(current),            # ✅ string
+    )
     return a
 
 
@@ -66,13 +72,13 @@ def list_assessments(
     current=Depends(get_current_user),
 ):
     try:
-        course_uuid = uuid.UUID(course_id)
+        uuid.UUID(course_id)
     except Exception:
-        raise HTTPException(status_code=400, detail="Invalid course_id (must be UUID)")
+        raise HTTPException(status_code=400, detail="Invalid course_id (must be UUID format)")
 
     return (
         db.query(Assessment)
-        .filter(Assessment.course_id == course_uuid)
+        .filter(Assessment.course_id == course_id)  # ✅ string compare
         .order_by(Assessment.created_at.desc())
         .all()
     )
@@ -125,11 +131,15 @@ async def upload_questions_file(
         af = save_questions_file_and_extract_text(
             db=db,
             assessment_id=a.id,
-            course_id=a.course_id,
+            course_id=a.course_id,  # ✅ string in DB
             file_bytes=b,
             filename=file.filename or "questions.pdf",
         )
-        return {"ok": True, "assessment_file_id": str(af.id), "extracted_len": len(af.extracted_text or "")}
+        return {
+            "ok": True,
+            "assessment_file_id": str(af.id),
+            "extracted_len": len(af.extracted_text or ""),
+        }
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 

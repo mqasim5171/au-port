@@ -2,7 +2,6 @@
 from routers.auth import get_current_user
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
-
 from core.db import get_db
 
 from models.suggestion import Suggestion, SuggestionAction
@@ -15,7 +14,9 @@ from schemas.suggestion import (
     ActionOut,
 )
 
-router = APIRouter(prefix="/api", tags=["Suggestions"])
+# ✅ remove prefix="/api"
+router = APIRouter(tags=["Suggestions"])
+
 
 @router.get("/courses/{course_id}/suggestions", response_model=list[SuggestionOut])
 def list_suggestions(course_id: str, db: Session = Depends(get_db), user=Depends(get_current_user)):

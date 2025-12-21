@@ -16,7 +16,11 @@ def utcnow():
 class StudentSubmission(Base):
     __tablename__ = "student_submissions"
 
-    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid.uuid4,
+    )
 
     assessment_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
@@ -25,7 +29,7 @@ class StudentSubmission(Base):
         nullable=False,
     )
 
-    # your Student.id is String(36)
+    # students.id is varchar(36)
     student_id: Mapped[str] = mapped_column(
         String(36),
         ForeignKey("students.id", ondelete="CASCADE"),
@@ -33,21 +37,35 @@ class StudentSubmission(Base):
         nullable=False,
     )
 
-    # ✅ Upload.id is UUID
+    # uploads.id is UUID
     upload_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("uploads.id", ondelete="SET NULL"),
         nullable=True,
     )
 
-    status: Mapped[str] = mapped_column(String(30), default="uploaded", nullable=False)
+    # DB column exists (you added it) OR add it if missing
+    status: Mapped[str] = mapped_column(
+        String(30),
+        default="uploaded",
+        nullable=False,
+    )
 
+    # DB columns exist (add them if missing)
     ai_marks: Mapped[float | None] = mapped_column(Float, nullable=True)
     ai_feedback: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     evidence_json: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
 
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
+    # ✅ IMPORTANT FIX:
+    # DB uses submitted_at (NOT NULL). We keep your API field name "created_at",
+    # but map it to the DB column "submitted_at".
+    created_at: Mapped[datetime] = mapped_column(
+        "submitted_at",
+        DateTime(timezone=True),
+        default=utcnow,
+        nullable=False,
+    )
 
     # relationships
     assessment = relationship("Assessment", back_populates="submissions")

@@ -12,7 +12,7 @@ export default function AssessmentDetail() {
 
   const load = async () => {
     setErr("");
-    const res = await api.get(`/api/assessments/${id}`);
+    const res = await api.get(`/assessments/${id}`); // ✅ removed /api
     setData(res.data);
   };
 
@@ -28,9 +28,11 @@ export default function AssessmentDetail() {
     try {
       const form = new FormData();
       form.append("file", qFile);
-      await api.post(`/api/assessments/${id}/questions/upload`, form, {
+
+      await api.post(`/assessments/${id}/questions/upload`, form, {
         headers: { "Content-Type": "multipart/form-data" },
       });
+
       await load();
     } catch (e) {
       setErr(e?.response?.data?.detail || "Upload questions failed");
@@ -43,7 +45,7 @@ export default function AssessmentDetail() {
     setErr("");
     setBusy(true);
     try {
-      await api.post(`/api/assessments/${id}/generate-expected-answers`);
+      await api.post(`/assessments/${id}/generate-expected-answers`); // ✅ removed /api
       await load();
     } catch (e) {
       setErr(e?.response?.data?.detail || "Generate failed");
@@ -59,9 +61,11 @@ export default function AssessmentDetail() {
     try {
       const form = new FormData();
       form.append("file", zipFile);
-      await api.post(`/api/assessments/${id}/submissions/upload-zip`, form, {
+
+      await api.post(`/assessments/${id}/submissions/upload-zip`, form, {
         headers: { "Content-Type": "multipart/form-data" },
       });
+
       alert("ZIP uploaded");
     } catch (e) {
       setErr(e?.response?.data?.detail || "Upload ZIP failed");
@@ -74,7 +78,7 @@ export default function AssessmentDetail() {
     setErr("");
     setBusy(true);
     try {
-      await api.post(`/api/assessments/${id}/grade-all`);
+      await api.post(`/assessments/${id}/grade-all`); // ✅ removed /api
       alert("Grading started/completed");
     } catch (e) {
       setErr(e?.response?.data?.detail || "Grade failed");
@@ -91,7 +95,10 @@ export default function AssessmentDetail() {
     <div className="page">
       <div className="card">
         <h2>{assessment.title}</h2>
-        <p className="muted">Type: {assessment.type} | Max marks: {assessment.max_marks}</p>
+        <p className="muted">
+          Type: {assessment.type} | Max marks: {assessment.max_marks} | Weightage: {assessment.weightage} | Date: {String(assessment.date).slice(0, 10)}
+        </p>
+
         {err && <div className="alert alert-danger">{err}</div>}
 
         <div className="row" style={{ marginTop: 10 }}>
@@ -118,7 +125,7 @@ export default function AssessmentDetail() {
 
         <div>
           <b>Expected Answers:</b>{" "}
-          {expected?.parsed_json ? "✅ Generated" : "❌ Not generated"}
+          {expected?.parsed_json ? "✅ Generated" : "❌ Not generated clar"}
           {expected?.model && <span className="muted"> (model: {expected.model})</span>}
           {expected?.parsed_json && (
             <pre style={{ marginTop: 10, maxHeight: 300, overflow: "auto" }}>
@@ -161,7 +168,7 @@ function SubmissionsTable({ assessmentId }) {
   const load = async () => {
     setErr("");
     try {
-      const res = await api.get(`/api/assessments/${assessmentId}/submissions`);
+      const res = await api.get(`/assessments/${assessmentId}/submissions`); // ✅ removed /api
       setRows(res.data || []);
     } catch (e) {
       setErr(e?.response?.data?.detail || "Failed to load submissions");
