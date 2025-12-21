@@ -5,6 +5,7 @@ from typing import Optional
 
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy import String, Integer, Text, DateTime, Boolean, ForeignKey
+from sqlalchemy import Column, String, Integer, DateTime, Text, Float, ForeignKey
 
 from core.base import Base
 
@@ -46,6 +47,11 @@ class WeeklyPlan(Base):
 
 class WeeklyExecution(Base):
     __tablename__ = "weekly_executions"
+
+    coverage_percent = Column(Float, nullable=False, default=0)
+    missing_topics = Column(Text, nullable=True)
+    matched_topics = Column(Text, nullable=True)
+
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=gen_id)
     course_id: Mapped[str] = mapped_column(

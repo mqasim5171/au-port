@@ -3,6 +3,10 @@ from sqlalchemy.exc import OperationalError
 from sqlalchemy import inspect
 from core.db import engine
 from core.base import Base
+from models.course_staff import CourseStaff  # noqa: F401
+from models.course_staff import CourseStaff  # noqa
+from models.course_execution import WeeklyPlan  # noqa: F401
+   # noqa
 
 import models.suggestion
 from models import user, course, file_upload, feedback, course_execution  # noqa

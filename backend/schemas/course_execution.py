@@ -40,8 +40,13 @@ class WeeklyExecutionBase(BaseModel):
     delivered_topics: Optional[str] = None
     delivered_assessments: Optional[str] = None
     coverage_status: Optional[str] = "on_track"
-    # JSON-encoded list of upload IDs or folder IDs; keep as plain string from frontend
     evidence_links: Optional[str] = None
+
+    # ✅ NEW
+    coverage_percent: Optional[float] = 0
+    missing_topics: Optional[str] = None
+    matched_topics: Optional[str] = None
+
 
 
 class WeeklyExecutionCreate(WeeklyExecutionBase):

@@ -10,6 +10,7 @@ import {
   XMarkIcon,
 } from "@heroicons/react/24/outline";
 import "../App.css";
+import { useNavigate } from "react-router-dom";
 
 // ---------- helper to extract error ----------
 const extractErr = (e) => {
@@ -41,6 +42,7 @@ const inferFolderFromTitle = (title = "") => {
 };
 
 export default function CourseFolder() {
+  const navigate = useNavigate(); 
   const [courses, setCourses] = useState([]);
   const [selectedCourse, setSelectedCourse] = useState("");
 
@@ -367,6 +369,14 @@ export default function CourseFolder() {
                 <p>
                   <strong>Department:</strong> {selectedCourseData.department}
                 </p>
+                <button
+      type="button"
+      className="btn-primary"
+      style={{ marginTop: 12, width: "100%" }}
+      onClick={() => navigate(`/courses/${selectedCourse}/assessments`)}
+    >
+      Open Assessments
+    </button>
               </div>
             )}
           </div>
