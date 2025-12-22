@@ -1,3 +1,4 @@
+// frontend/src/pages/AssessmentDetail.js
 import React, { useEffect, useState } from "react";
 import api from "../api";
 import { useParams } from "react-router-dom";
@@ -10,9 +11,12 @@ export default function AssessmentDetail() {
   const [err, setErr] = useState("");
   const [busy, setBusy] = useState(false);
 
+  // ✅ key to force submissions refresh
+  const [refreshKey, setRefreshKey] = useState(0);
+
   const load = async () => {
     setErr("");
-    const res = await api.get(`/assessments/${id}`); // ✅ removed /api
+    const res = await api.get(`/assessments/${id}`);
     setData(res.data);
   };
 
@@ -45,7 +49,7 @@ export default function AssessmentDetail() {
     setErr("");
     setBusy(true);
     try {
-      await api.post(`/assessments/${id}/generate-expected-answers`); // ✅ removed /api
+      await api.post(`/assessments/${id}/generate-expected-answers`);
       await load();
     } catch (e) {
       setErr(e?.response?.data?.detail || "Generate failed");
@@ -62,11 +66,14 @@ export default function AssessmentDetail() {
       const form = new FormData();
       form.append("file", zipFile);
 
-      await api.post(`/assessments/${id}/submissions/upload-zip`, form, {
+      const res = await api.post(`/assessments/${id}/submissions/upload-zip`, form, {
         headers: { "Content-Type": "multipart/form-data" },
       });
 
-      alert("ZIP uploaded");
+      alert(`ZIP uploaded ✅\nCreated: ${res?.data?.created ?? 0}\nUpdated: ${res?.data?.updated ?? 0}\nSkipped: ${res?.data?.skipped ?? 0}`);
+
+      // ✅ refresh table immediately
+      setRefreshKey((k) => k + 1);
     } catch (e) {
       setErr(e?.response?.data?.detail || "Upload ZIP failed");
     } finally {
@@ -78,8 +85,11 @@ export default function AssessmentDetail() {
     setErr("");
     setBusy(true);
     try {
-      await api.post(`/assessments/${id}/grade-all`); // ✅ removed /api
-      alert("Grading started/completed");
+      const res = await api.post(`/assessments/${id}/grade-all`);
+      alert(`Grading done ✅\nGraded: ${res?.data?.graded ?? 0}\nFailed: ${res?.data?.failed ?? 0}`);
+
+      // ✅ refresh table immediately
+      setRefreshKey((k) => k + 1);
     } catch (e) {
       setErr(e?.response?.data?.detail || "Grade failed");
     } finally {
@@ -125,7 +135,7 @@ export default function AssessmentDetail() {
 
         <div>
           <b>Expected Answers:</b>{" "}
-          {expected?.parsed_json ? "✅ Generated" : "❌ Not generated clar"}
+          {expected?.parsed_json ? "✅ Generated" : "❌ Not generated"}
           {expected?.model && <span className="muted"> (model: {expected.model})</span>}
           {expected?.parsed_json && (
             <pre style={{ marginTop: 10, maxHeight: 300, overflow: "auto" }}>
@@ -155,20 +165,20 @@ export default function AssessmentDetail() {
           <button className="btn" onClick={grade} disabled={busy}>Grade All</button>
         </div>
 
-        <SubmissionsTable assessmentId={assessment.id} />
+        <SubmissionsTable assessmentId={assessment.id} refreshKey={refreshKey} />
       </div>
     </div>
   );
 }
 
-function SubmissionsTable({ assessmentId }) {
+function SubmissionsTable({ assessmentId, refreshKey }) {
   const [rows, setRows] = useState([]);
   const [err, setErr] = useState("");
 
   const load = async () => {
     setErr("");
     try {
-      const res = await api.get(`/assessments/${assessmentId}/submissions`); // ✅ removed /api
+      const res = await api.get(`/assessments/${assessmentId}/submissions`);
       setRows(res.data || []);
     } catch (e) {
       setErr(e?.response?.data?.detail || "Failed to load submissions");
@@ -178,7 +188,7 @@ function SubmissionsTable({ assessmentId }) {
   useEffect(() => {
     load();
     // eslint-disable-next-line
-  }, [assessmentId]);
+  }, [assessmentId, refreshKey]); // ✅ reload after upload/grade
 
   return (
     <div style={{ marginTop: 12 }}>
@@ -194,13 +204,18 @@ function SubmissionsTable({ assessmentId }) {
           </tr>
         </thead>
         <tbody>
-          {rows.map((r) => (
-            <tr key={r.id}>
-              <td>{r.status}</td>
-              <td>{r.ai_marks ?? "-"}</td>
-              <td style={{ maxWidth: 500 }}>{(r.ai_feedback || "").slice(0, 180)}</td>
-            </tr>
-          ))}
+          {rows.map((r) => {
+            const fb = r.ai_feedback || "";
+            return (
+              <tr key={r.id}>
+                <td>{r.status}</td>
+                <td>{r.ai_marks ?? "-"}</td>
+                <td title={fb} style={{ maxWidth: 500 }}>
+                  {fb.slice(0, 180)}{fb.length > 180 ? "..." : ""}
+                </td>
+              </tr>
+            );
+          })}
           {!rows.length && (
             <tr><td colSpan={3} className="muted">No submissions yet.</td></tr>
           )}

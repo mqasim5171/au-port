@@ -81,8 +81,12 @@ def upload_submissions_zip(
     storage_root: str = "uploads/submissions",
 ) -> Dict[str, Any]:
     """
-    DB MATCH:
-    student_submissions:
+    Writes submissions into:
+      - uploads
+      - upload_texts
+      - student_submissions
+
+    student_submissions DB columns:
       id varchar(36)
       assessment_id uuid
       student_id varchar(36)
@@ -112,6 +116,7 @@ def upload_submissions_zip(
     files = _safe_extract_zip(str(zip_path), str(extracted_dir))
 
     created = 0
+    updated = 0
     skipped = 0
     errors: list[str] = []
 
@@ -133,7 +138,6 @@ def upload_submissions_zip(
             # Find/create Student by reg_no
             student = db.query(Student).filter(Student.reg_no == reg_no).first()
             if not student:
-                # keep safe defaults (your Student model might require these)
                 student = Student(
                     reg_no=reg_no,
                     name=reg_no,
@@ -153,7 +157,7 @@ def upload_submissions_zip(
                 week_no=None,
                 bytes=Path(fp).stat().st_size if Path(fp).exists() else 0,
                 parse_log=[],
-                created_at=utcnow(),
+                created_at=datetime.utcnow(),
             )
             db.add(up)
             db.flush()
@@ -167,7 +171,7 @@ def upload_submissions_zip(
             )
             db.add(ut)
 
-            # ✅ Avoid duplicate rows for same student+assessment (optional but helpful)
+            # If same student already uploaded for same assessment, update instead of duplicating
             existing = (
                 db.query(StudentSubmission)
                 .filter(
@@ -176,13 +180,18 @@ def upload_submissions_zip(
                 )
                 .first()
             )
+
             if existing:
-                # update the upload/text pointer instead of creating another
                 existing.upload_id = up.id
                 existing.status = "uploaded"
+                existing.ai_marks = None
+                existing.ai_feedback = None
+                existing.obtained_marks = None
+                existing.grader_id = None
                 existing.evidence_json = {"reg_no": reg_no, "filename": Path(fp).name}
                 existing.submitted_at = utcnow()
                 db.add(existing)
+                updated += 1
             else:
                 sub = StudentSubmission(
                     assessment_id=assessment.id,
@@ -191,30 +200,32 @@ def upload_submissions_zip(
                     status="uploaded",
                     ai_marks=None,
                     ai_feedback=None,
+                    obtained_marks=None,
+                    grader_id=None,
                     evidence_json={"reg_no": reg_no, "filename": Path(fp).name},
-                    submitted_at=utcnow(),  # ✅ IMPORTANT (NOT NULL)
+                    submitted_at=utcnow(),
                 )
                 db.add(sub)
-
-            created += 1
+                created += 1
 
         except Exception as e:
             errors.append(f"{Path(fp).name}: {str(e)}")
 
     db.commit()
-    return {"files_seen": len(files), "created": created, "skipped": skipped, "errors": errors}
+    return {
+        "files_seen": len(files),
+        "created": created,
+        "updated": updated,
+        "skipped": skipped,
+        "errors": errors,
+    }
 
 
 def _load_grading_prompt() -> str:
-    """
-    Try reading services/ai_prompts/grading_v1.txt
-    If missing, fall back to a safe inline prompt.
-    """
     p = Path(__file__).resolve().parent / "ai_prompts" / "grading_v1.txt"
     if p.exists():
         return p.read_text(encoding="utf-8")
 
-    # fallback prompt so grade-all doesn't crash
     return (
         "You are an examiner. Grade the student's submission against expected answers.\n"
         "Return JSON only following the given schema.\n"
@@ -236,6 +247,15 @@ def grade_all(
     if not exp or not exp.parsed_json:
         raise ValueError("Expected answers not generated. Run generate-expected-answers first.")
 
+    subs = (
+        db.query(StudentSubmission)
+        .filter(StudentSubmission.assessment_id == assessment.id)
+        .order_by(StudentSubmission.submitted_at.asc())
+        .all()
+    )
+    if not subs:
+        raise ValueError("No submissions found for this assessment. Upload submissions ZIP first.")
+
     gr = GradingRun(
         assessment_id=assessment.id,
         model=model,
@@ -251,7 +271,6 @@ def grade_all(
 
     system = _load_grading_prompt()
 
-    # schema hint: match what your UI expects, but also provide per_question
     schema_hint = json.dumps(
         {
             "total_marks": 0,
@@ -266,16 +285,6 @@ def grade_all(
             ],
         }
     )
-
-    subs = (
-        db.query(StudentSubmission)
-        .filter(StudentSubmission.assessment_id == assessment.id)
-        .order_by(StudentSubmission.submitted_at.asc())  # ✅ FIX (created_at not in DB)
-        .all()
-    )
-
-    if not subs:
-        raise ValueError("No submissions found for this assessment. Upload submissions ZIP first.")
 
     graded = 0
     failed = 0
@@ -308,7 +317,6 @@ def grade_all(
             total = float(parsed.get("total_marks") or 0.0)
             feedback = str(parsed.get("feedback") or "")
 
-            # ✅ store in BOTH (your DB has obtained_marks + ai_marks)
             s.ai_marks = total
             s.obtained_marks = int(round(total))
             s.ai_feedback = feedback

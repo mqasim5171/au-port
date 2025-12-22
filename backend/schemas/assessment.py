@@ -72,11 +72,10 @@ class AssessmentDetailOut(BaseModel):
     clo_alignment: Optional[CLOAlignmentOut] = None
 
 
-# ✅ FIXED TO MATCH DB student_submissions
 class SubmissionOut(BaseModel):
-    id: str                         # ✅ DB: varchar(36)
+    id: str
     assessment_id: UUID
-    student_id: Optional[str] = None  # ✅ DB: varchar(36)
+    student_id: str
 
     file_upload_id: Optional[str] = None
     obtained_marks: Optional[int] = None
@@ -89,7 +88,7 @@ class SubmissionOut(BaseModel):
     ai_feedback: Optional[str] = None
     evidence_json: Optional[Any] = None
 
-    submitted_at: datetime          # ✅ DB column
+    submitted_at: datetime
 
     class Config:
         from_attributes = True
