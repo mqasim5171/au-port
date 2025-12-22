@@ -1,11 +1,18 @@
 # backend/app.py
+
+from dotenv import load_dotenv
+load_dotenv()
 import os
+
+print("OPENROUTER_API_KEY loaded:", bool(os.getenv("OPENROUTER_API_KEY")))
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from dotenv import load_dotenv
+load_dotenv()
 
 from core.schema_guard import ensure_all_tables_once
-
+from routers import assessments
 from routers import (
     auth,
     admin,
@@ -20,7 +27,7 @@ from routers import (
     course_clo,
     student_feedback,
     course_execution,
-    assessment_router,
+    
     student_router,
     grading_audit_router,
     suggestions,
@@ -48,9 +55,8 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-# ---------------------------------------------------------------------------
+# backend/app.py (only the include_router part)
 
-# Base Routers
 app.include_router(auth.router)
 app.include_router(users.router)
 app.include_router(courses.router)
@@ -62,18 +68,22 @@ app.include_router(clo_alignment.router)
 app.include_router(health.router)
 app.include_router(dashboard.router)
 app.include_router(student_feedback.router)
-app.include_router(assessment_router.router)
 app.include_router(student_router.router)
 app.include_router(grading_audit_router.router)
+
+# ✅ IMPORTANT: DO NOT prefix these with "/api"
+app.include_router(assessments.router)
+
+# ✅ IMPORTANT: DO NOT prefix these with "/execution"
+app.include_router(course_execution.router)
+app.include_router(execution_zip.router)
+
+# ✅ suggestions router currently has "/api" inside it — we'll fix the router file next
 app.include_router(suggestions.router)
+
 app.include_router(admin.router)
 app.include_router(course_lead.router)
-
-# ✅ IMPORTANT: expose execution endpoints under /execution
-# This makes your frontend URL work:
-#   /execution/courses/{courseId}/weeks/{weekNo}/weekly-zip
-app.include_router(course_execution.router, prefix="/execution")
-app.include_router(execution_zip.router, prefix="/execution")
+app.include_router(assessments.router, prefix="/api")
 
 # (Optional backwards compatibility)
 # app.include_router(course_execution.router)

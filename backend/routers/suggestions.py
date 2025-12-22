@@ -1,6 +1,13 @@
+<<<<<<< HEAD
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session, selectinload
 
+=======
+# backend/routers/suggestions.py
+from routers.auth import get_current_user
+from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy.orm import Session
+>>>>>>> 746b0dc610d6afbe54e26a68d265006dbf95a76d
 from core.db import get_db
 from routers.auth import get_current_user
 
@@ -14,7 +21,9 @@ from schemas.suggestion import (
     ActionOut,
 )
 
-router = APIRouter(prefix="/api", tags=["Suggestions"])
+# ✅ remove prefix="/api"
+router = APIRouter(tags=["Suggestions"])
+
 
 
 @router.get("/courses/{course_id}/suggestions", response_model=list[SuggestionOut])

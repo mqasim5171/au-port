@@ -14,8 +14,8 @@ import Admin from "./pages/Admin";
 import CourseGuideUpload from "./pages/CourseGuideUpload";
 import WeeklyUpload from "./pages/WeeklyUpload";
 
-import CourseAssessments from "./pages/CourseAssessments";
-import AssessmentDetail from "./pages/AssessmentDetail";
+import Assessments from "./pages/Assessments";
+import AssessmentDetail from "./pages/AssessmentsDetail"; // ✅ FIXED IMPORT
 
 import api from "./api";
 
@@ -23,7 +23,6 @@ function App() {
   const [user, setUser] = useState(null);
   const [bootstrapped, setBootstrapped] = useState(false);
 
-  // Rehydrate from localStorage and validate token once
   useEffect(() => {
     const token = localStorage.getItem("token");
     if (!token) {
@@ -49,7 +48,6 @@ function App() {
     })();
   }, []);
 
-  // Login handler
   const handleLogin = (me) => setUser(me);
 
   const handleLogout = () => {
@@ -70,23 +68,17 @@ function App() {
           </>
         ) : (
           <>
-            {/* ✅ All logged-in pages live under Layout */}
             <Route element={<Layout user={user} onLogout={handleLogout} />}>
               <Route path="/dashboard" element={<Dashboard />} />
               <Route path="/course-folder" element={<CourseFolder />} />
-
               <Route path="/weekly-upload" element={<WeeklyUpload />} />
 
+              {/* ✅ Assessments (List + Detail) */}
+              <Route path="/assessments" element={<Assessments />} />
+              <Route path="/assessments/:id" element={<AssessmentDetail />} />
 
               <Route path="/course-guide" element={<CourseGuideUpload user={user} />} />
-
-
-              {/* ✅ Admin page (Layout shows link only for admins) */}
               <Route path="/admin" element={<Admin user={user} />} />
-
-              {/* ✅ Assessments routes */}
-              <Route path="/courses/:courseId/assessments" element={<CourseAssessments />} />
-              <Route path="/assessments/:id" element={<AssessmentDetail />} />
 
               <Route path="/clo-alignment" element={<CLOAlignment />} />
               <Route path="/student-feedback" element={<StudentFeedback />} />
@@ -94,7 +86,6 @@ function App() {
               <Route path="/reports" element={<Reports />} />
               <Route path="/execution" element={<CourseExecutionMonitor />} />
 
-              {/* convenience: hit "/" goes to dashboard when logged in */}
               <Route path="/" element={<Navigate to="/dashboard" replace />} />
             </Route>
 
