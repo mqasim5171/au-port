@@ -80,12 +80,27 @@ def upload_submissions_zip(
     zip_filename: str,
     storage_root: str = "uploads/submissions",
 ) -> Dict[str, Any]:
+    """
+    DB MATCH:
+    student_submissions:
+      id varchar(36)
+      assessment_id uuid
+      student_id varchar(36)
+      upload_id uuid NULL
+      status varchar NOT NULL default uploaded
+      ai_marks double precision NULL
+      ai_feedback text NULL
+      evidence_json jsonb NULL
+      submitted_at timestamptz NOT NULL default now()
+
+    ✅ We set submitted_at explicitly to avoid NOT NULL issues.
+    """
     now = utcnow()
 
     base_dir = (
         Path(storage_root)
-        / str(assessment.course_id)
-        / str(assessment.id)
+        / str(assessment.course_id)  # course_id is varchar in DB
+        / str(assessment.id)         # assessment.id is uuid
         / str(int(now.timestamp() * 1000))
     )
     base_dir.mkdir(parents=True, exist_ok=True)
@@ -101,71 +116,110 @@ def upload_submissions_zip(
     errors: list[str] = []
 
     for fp in files:
-        ext = Path(fp).suffix.lower()
-        if ext not in ALLOWED_SUB_EXTS:
-            skipped += 1
-            continue
+        try:
+            ext = Path(fp).suffix.lower()
+            if ext not in ALLOWED_SUB_EXTS:
+                skipped += 1
+                continue
 
-        parsed = parse_document(fp) or {}
-        text = clean_text(parsed.get("text") or "")[:MAX_TEXT]
-        if not text.strip():
-            skipped += 1
-            continue
+            parsed = parse_document(fp) or {}
+            text = clean_text(parsed.get("text") or "")[:MAX_TEXT]
+            if not text.strip():
+                skipped += 1
+                continue
 
-        reg_no = _infer_reg_no(Path(fp).name)
+            reg_no = _infer_reg_no(Path(fp).name)
 
-        # ✅ Student model does NOT have course_id in your file
-        student = db.query(Student).filter(Student.reg_no == reg_no).first()
-        if not student:
-            # program/section are required in your Student model typing => set defaults
-            student = Student(
-                reg_no=reg_no,
-                name=reg_no,
-                program="N/A",
-                section="N/A",
+            # Find/create Student by reg_no
+            student = db.query(Student).filter(Student.reg_no == reg_no).first()
+            if not student:
+                # keep safe defaults (your Student model might require these)
+                student = Student(
+                    reg_no=reg_no,
+                    name=reg_no,
+                    program="N/A",
+                    section="N/A",
+                )
+                db.add(student)
+                db.flush()
+
+            # Save Upload + UploadText
+            up = Upload(
+                course_id=str(assessment.course_id),
+                filename_original=Path(fp).name,
+                filename_stored=Path(fp).name,
+                ext=ext.lstrip("."),
+                file_type_guess="student_submission",
+                week_no=None,
+                bytes=Path(fp).stat().st_size if Path(fp).exists() else 0,
+                parse_log=[],
+                created_at=utcnow(),
             )
-            db.add(student)
+            db.add(up)
             db.flush()
 
-        # Save Upload + UploadText (Upload.course_id is String in your model => store UUID as string)
-        up = Upload(
-            course_id=str(assessment.course_id),
-            filename_original=Path(fp).name,
-            filename_stored=Path(fp).name,
-            ext=ext.lstrip("."),
-            file_type_guess="student_submission",
-            week_no=None,
-            bytes=Path(fp).stat().st_size if Path(fp).exists() else 0,
-            parse_log=[],
-            created_at=datetime.utcnow(),
-        )
-        db.add(up)
-        db.flush()
+            ut = UploadText(
+                upload_id=up.id,
+                text=text,
+                text_chars=len(text),
+                needs_ocr=False,
+                parse_warnings=[],
+            )
+            db.add(ut)
 
-        ut = UploadText(
-            upload_id=up.id,
-            text=text,
-            text_chars=len(text),
-            needs_ocr=False,
-            parse_warnings=[],
-        )
-        db.add(ut)
+            # ✅ Avoid duplicate rows for same student+assessment (optional but helpful)
+            existing = (
+                db.query(StudentSubmission)
+                .filter(
+                    StudentSubmission.assessment_id == assessment.id,
+                    StudentSubmission.student_id == student.id,
+                )
+                .first()
+            )
+            if existing:
+                # update the upload/text pointer instead of creating another
+                existing.upload_id = up.id
+                existing.status = "uploaded"
+                existing.evidence_json = {"reg_no": reg_no, "filename": Path(fp).name}
+                existing.submitted_at = utcnow()
+                db.add(existing)
+            else:
+                sub = StudentSubmission(
+                    assessment_id=assessment.id,
+                    student_id=student.id,
+                    upload_id=up.id,
+                    status="uploaded",
+                    ai_marks=None,
+                    ai_feedback=None,
+                    evidence_json={"reg_no": reg_no, "filename": Path(fp).name},
+                    submitted_at=utcnow(),  # ✅ IMPORTANT (NOT NULL)
+                )
+                db.add(sub)
 
-        sub = StudentSubmission(
-            assessment_id=assessment.id,
-            student_id=student.id,
-            upload_id=up.id,
-            status="uploaded",
-            ai_marks=None,
-            ai_feedback=None,
-            evidence_json={"reg_no": reg_no, "filename": Path(fp).name},
-            created_at=utcnow(),
-        )
-        db.add(sub)
-        created += 1
+            created += 1
+
+        except Exception as e:
+            errors.append(f"{Path(fp).name}: {str(e)}")
 
     db.commit()
     return {"files_seen": len(files), "created": created, "skipped": skipped, "errors": errors}
+
+
+def _load_grading_prompt() -> str:
+    """
+    Try reading services/ai_prompts/grading_v1.txt
+    If missing, fall back to a safe inline prompt.
+    """
+    p = Path(__file__).resolve().parent / "ai_prompts" / "grading_v1.txt"
+    if p.exists():
+        return p.read_text(encoding="utf-8")
+
+    # fallback prompt so grade-all doesn't crash
+    return (
+        "You are an examiner. Grade the student's submission against expected answers.\n"
+        "Return JSON only following the given schema.\n"
+        "Be strict but fair. Use MAX_MARKS.\n"
+    )
 
 
 def grade_all(
@@ -195,15 +249,33 @@ def grade_all(
     db.commit()
     db.refresh(gr)
 
-    system = (Path(__file__).resolve().parent / "ai_prompts" / "grading_v1.txt").read_text(encoding="utf-8")
-    schema_hint = '{"total_marks":10,"feedback":"...","per_question":[{"question_no":1,"marks_awarded":2,"justification":"...","missing_points":["..."]}]}'
+    system = _load_grading_prompt()
+
+    # schema hint: match what your UI expects, but also provide per_question
+    schema_hint = json.dumps(
+        {
+            "total_marks": 0,
+            "feedback": "string",
+            "per_question": [
+                {
+                    "question_no": 1,
+                    "marks_awarded": 0,
+                    "justification": "string",
+                    "missing_points": ["string"],
+                }
+            ],
+        }
+    )
 
     subs = (
         db.query(StudentSubmission)
         .filter(StudentSubmission.assessment_id == assessment.id)
-        .order_by(StudentSubmission.created_at.asc())
+        .order_by(StudentSubmission.submitted_at.asc())  # ✅ FIX (created_at not in DB)
         .all()
     )
+
+    if not subs:
+        raise ValueError("No submissions found for this assessment. Upload submissions ZIP first.")
 
     graded = 0
     failed = 0
@@ -215,6 +287,8 @@ def grade_all(
                 ut = db.query(UploadText).filter(UploadText.upload_id == s.upload_id).first()
 
             sub_text = clean_text((ut.text if ut else "") or "")[:MAX_TEXT]
+            if not sub_text.strip():
+                raise ValueError("Submission text is empty (parsing failed).")
 
             user = (
                 f"ASSESSMENT_TITLE: {assessment.title}\n"
@@ -228,15 +302,19 @@ def grade_all(
                 user=user,
                 schema_hint=schema_hint,
                 model=model,
-                temperature=0.2
+                temperature=0.2,
             )
 
             total = float(parsed.get("total_marks") or 0.0)
             feedback = str(parsed.get("feedback") or "")
 
+            # ✅ store in BOTH (your DB has obtained_marks + ai_marks)
             s.ai_marks = total
+            s.obtained_marks = int(round(total))
             s.ai_feedback = feedback
             s.status = "graded"
+            s.grader_id = created_by
+
             s.evidence_json = {
                 **(s.evidence_json or {}),
                 "grading_run_id": str(gr.id),
@@ -246,6 +324,7 @@ def grade_all(
                 "raw_response": meta.get("raw_response"),
                 "parsed": parsed,
             }
+
             db.add(s)
             graded += 1
 

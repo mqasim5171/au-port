@@ -1,3 +1,4 @@
+# backend/schemas/assessment.py
 from pydantic import BaseModel, Field
 from typing import Optional, Any, List, Dict
 from datetime import datetime, date
@@ -7,15 +8,8 @@ from uuid import UUID
 class AssessmentCreate(BaseModel):
     type: str
     title: str
-
-    # Make marks required (or keep default if you really want)
     max_marks: int = Field(..., ge=0)
-
-    # ✅ REQUIRED because DB column is NOT NULL
     weightage: int = Field(..., ge=0)
-
-    # ✅ REQUIRED because DB column is NOT NULL
-    # Send as "2025-12-21"
     date: date
 
 
@@ -27,13 +21,11 @@ class AssessmentOut(BaseModel):
     max_marks: int
     weightage: int
     date: date
-
     created_by: Optional[str] = None
     created_at: datetime
 
     class Config:
         from_attributes = True
-
 
 
 class AssessmentFileOut(BaseModel):
@@ -80,16 +72,24 @@ class AssessmentDetailOut(BaseModel):
     clo_alignment: Optional[CLOAlignmentOut] = None
 
 
+# ✅ FIXED TO MATCH DB student_submissions
 class SubmissionOut(BaseModel):
-    id: UUID
+    id: str                         # ✅ DB: varchar(36)
     assessment_id: UUID
-    student_id: Optional[UUID] = None
+    student_id: Optional[str] = None  # ✅ DB: varchar(36)
+
+    file_upload_id: Optional[str] = None
+    obtained_marks: Optional[int] = None
+    grader_id: Optional[str] = None
+
     upload_id: Optional[UUID] = None
     status: str
+
     ai_marks: Optional[float] = None
     ai_feedback: Optional[str] = None
     evidence_json: Optional[Any] = None
-    created_at: datetime
+
+    submitted_at: datetime          # ✅ DB column
 
     class Config:
         from_attributes = True
