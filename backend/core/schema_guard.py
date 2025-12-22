@@ -2,6 +2,7 @@
 from sqlalchemy.exc import OperationalError
 from core.db import engine
 from core.base import Base
+from models import completeness  # noqa: F401
 
 # ✅ import models so metadata knows them
 from models import user, course, uploads, course_execution  # noqa: F401

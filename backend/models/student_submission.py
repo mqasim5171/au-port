@@ -78,3 +78,19 @@ class StudentSubmission(Base):
     # relationships
     assessment = relationship("Assessment", back_populates="submissions")
     student = relationship("Student", back_populates="submissions")
+
+    # ✅ NEW: lets us read upload.filename_original easily in API
+    upload = relationship("Upload", foreign_keys=[upload_id], lazy="joined")
+
+    # ✅ computed fields for API (no DB migration needed)
+    @property
+    def roll_no(self) -> str | None:
+        return getattr(self.student, "reg_no", None) if self.student else None
+
+    @property
+    def student_name(self) -> str | None:
+        return getattr(self.student, "name", None) if self.student else None
+
+    @property
+    def filename_original(self) -> str | None:
+        return getattr(self.upload, "filename_original", None) if self.upload else None

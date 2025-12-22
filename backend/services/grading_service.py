@@ -4,7 +4,7 @@ import zipfile
 import re
 from pathlib import Path
 from datetime import datetime, timezone
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Tuple
 
 from sqlalchemy.orm import Session
 
@@ -55,6 +55,7 @@ def _safe_extract_zip(zip_path: str, dest_dir: str) -> List[str]:
             if member.endswith("/"):
                 continue
             target = (dest / member).resolve()
+            # zip-slip protection
             if not str(target).startswith(str(dest.resolve())):
                 continue
             target.parent.mkdir(parents=True, exist_ok=True)
@@ -66,11 +67,51 @@ def _safe_extract_zip(zip_path: str, dest_dir: str) -> List[str]:
 
 def _infer_reg_no(filename: str) -> str:
     base = Path(filename).stem
+
+    # common patterns: BSCS-FA22-123, 21-CS-500, etc
+    m = re.search(r"([A-Za-z]{2,10}[-_ ]?[A-Za-z]{1,10}[-_ ]?\d{2,4}[-_ ]?\d{2,6})", base)
+    if m:
+        return re.sub(r"[\s_]+", "-", m.group(1)).upper()
+
     m = re.search(r"([0-9]{2}[-_ ]?[A-Za-z]{2,}[-_ ]?[0-9]{2,})", base)
     if m:
         return re.sub(r"[\s_]+", "-", m.group(1)).upper()
+
     m2 = re.search(r"([0-9]{4,})", base)
     return (m2.group(1) if m2 else base[:40]).upper()
+
+
+# ✅ Extract from content
+ROLL_TEXT_RE = re.compile(
+    r"(student\s*roll\s*no|roll\s*no|registration\s*no|reg\s*no)\s*[:\-]?\s*([A-Za-z0-9][A-Za-z0-9\-_/]{3,})",
+    re.IGNORECASE
+)
+NAME_TEXT_RE = re.compile(
+    r"(student\s*name)\s*[:\-]?\s*(.+)",
+    re.IGNORECASE
+)
+
+
+def _extract_roll_and_name_from_text(text: str) -> Tuple[Optional[str], Optional[str]]:
+    if not text:
+        return None, None
+
+    roll = None
+    name = None
+
+    m = ROLL_TEXT_RE.search(text)
+    if m:
+        roll = (m.group(2) or "").strip()
+
+    m2 = NAME_TEXT_RE.search(text)
+    if m2:
+        name = (m2.group(2) or "").strip()
+        name = name.splitlines()[0].strip()
+
+    if roll:
+        roll = roll.replace("_", "-").replace(" ", "-").upper()
+
+    return roll or None, name or None
 
 
 def upload_submissions_zip(
@@ -80,31 +121,12 @@ def upload_submissions_zip(
     zip_filename: str,
     storage_root: str = "uploads/submissions",
 ) -> Dict[str, Any]:
-    """
-    Writes submissions into:
-      - uploads
-      - upload_texts
-      - student_submissions
-
-    student_submissions DB columns:
-      id varchar(36)
-      assessment_id uuid
-      student_id varchar(36)
-      upload_id uuid NULL
-      status varchar NOT NULL default uploaded
-      ai_marks double precision NULL
-      ai_feedback text NULL
-      evidence_json jsonb NULL
-      submitted_at timestamptz NOT NULL default now()
-
-    ✅ We set submitted_at explicitly to avoid NOT NULL issues.
-    """
     now = utcnow()
 
     base_dir = (
         Path(storage_root)
-        / str(assessment.course_id)  # course_id is varchar in DB
-        / str(assessment.id)         # assessment.id is uuid
+        / str(assessment.course_id)
+        / str(assessment.id)
         / str(int(now.timestamp() * 1000))
     )
     base_dir.mkdir(parents=True, exist_ok=True)
@@ -122,7 +144,8 @@ def upload_submissions_zip(
 
     for fp in files:
         try:
-            ext = Path(fp).suffix.lower()
+            fp_path = Path(fp)
+            ext = fp_path.suffix.lower()
             if ext not in ALLOWED_SUB_EXTS:
                 skipped += 1
                 continue
@@ -133,29 +156,35 @@ def upload_submissions_zip(
                 skipped += 1
                 continue
 
-            reg_no = _infer_reg_no(Path(fp).name)
+            # ✅ Prefer roll from file CONTENT, fallback to filename inference
+            roll_from_text, name_from_text = _extract_roll_and_name_from_text(text)
+            reg_no = roll_from_text or _infer_reg_no(fp_path.name)
 
             # Find/create Student by reg_no
             student = db.query(Student).filter(Student.reg_no == reg_no).first()
             if not student:
                 student = Student(
                     reg_no=reg_no,
-                    name=reg_no,
+                    name=(name_from_text or reg_no),
                     program="N/A",
                     section="N/A",
                 )
                 db.add(student)
                 db.flush()
+            else:
+                if name_from_text and (student.name in (None, "", student.reg_no)):
+                    student.name = name_from_text
+                    db.add(student)
 
             # Save Upload + UploadText
             up = Upload(
                 course_id=str(assessment.course_id),
-                filename_original=Path(fp).name,
-                filename_stored=Path(fp).name,
+                filename_original=fp_path.name,   # ✅ used by UI
+                filename_stored=fp_path.name,
                 ext=ext.lstrip("."),
                 file_type_guess="student_submission",
                 week_no=None,
-                bytes=Path(fp).stat().st_size if Path(fp).exists() else 0,
+                bytes=fp_path.stat().st_size if fp_path.exists() else 0,
                 parse_log=[],
                 created_at=datetime.utcnow(),
             )
@@ -171,7 +200,6 @@ def upload_submissions_zip(
             )
             db.add(ut)
 
-            # If same student already uploaded for same assessment, update instead of duplicating
             existing = (
                 db.query(StudentSubmission)
                 .filter(
@@ -181,6 +209,12 @@ def upload_submissions_zip(
                 .first()
             )
 
+            ev = {
+                "reg_no": reg_no,
+                "student_name": name_from_text,
+                "filename_original": fp_path.name,
+            }
+
             if existing:
                 existing.upload_id = up.id
                 existing.status = "uploaded"
@@ -188,7 +222,7 @@ def upload_submissions_zip(
                 existing.ai_feedback = None
                 existing.obtained_marks = None
                 existing.grader_id = None
-                existing.evidence_json = {"reg_no": reg_no, "filename": Path(fp).name}
+                existing.evidence_json = {**(existing.evidence_json or {}), **ev}
                 existing.submitted_at = utcnow()
                 db.add(existing)
                 updated += 1
@@ -202,7 +236,7 @@ def upload_submissions_zip(
                     ai_feedback=None,
                     obtained_marks=None,
                     grader_id=None,
-                    evidence_json={"reg_no": reg_no, "filename": Path(fp).name},
+                    evidence_json=ev,
                     submitted_at=utcnow(),
                 )
                 db.add(sub)

@@ -1,8 +1,9 @@
 # backend/schemas/assessment.py
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field ,ConfigDict
 from typing import Optional, Any, List, Dict
 from datetime import datetime, date
 from uuid import UUID
+
 
 
 class AssessmentCreate(BaseModel):
@@ -72,23 +73,20 @@ class AssessmentDetailOut(BaseModel):
     clo_alignment: Optional[CLOAlignmentOut] = None
 
 
+
 class SubmissionOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     id: str
-    assessment_id: UUID
-    student_id: str
-
-    file_upload_id: Optional[str] = None
-    obtained_marks: Optional[int] = None
-    grader_id: Optional[str] = None
-
-    upload_id: Optional[UUID] = None
     status: str
+    submitted_at: datetime
 
     ai_marks: Optional[float] = None
+    obtained_marks: Optional[int] = None
     ai_feedback: Optional[str] = None
     evidence_json: Optional[Any] = None
 
-    submitted_at: datetime
-
-    class Config:
-        from_attributes = True
+    # ✅ NEW (comes from @property in model)
+    roll_no: Optional[str] = None
+    student_name: Optional[str] = None
+    filename_original: Optional[str] = None

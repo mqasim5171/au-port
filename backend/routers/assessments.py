@@ -1,6 +1,7 @@
 # backend/routers/assessments.py
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
+
 from typing import List
 import uuid
 
@@ -217,6 +218,8 @@ def grade_all_api(
         raise HTTPException(status_code=400, detail=str(e))
 
 
+
+
 @router.get("/assessments/{assessment_id}/submissions", response_model=List[SubmissionOut])
 def list_submissions(
     assessment_id: str,
@@ -230,7 +233,11 @@ def list_submissions(
 
     return (
         db.query(StudentSubmission)
+        .options(
+            joinedload(StudentSubmission.student),
+            joinedload(StudentSubmission.upload),
+        )
         .filter(StudentSubmission.assessment_id == aid)
-        .order_by(StudentSubmission.submitted_at.desc())  # ✅ FIX
+        .order_by(StudentSubmission.submitted_at.desc())
         .all()
     )

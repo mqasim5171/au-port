@@ -8,9 +8,8 @@ print("OPENROUTER_API_KEY loaded:", bool(os.getenv("OPENROUTER_API_KEY")))
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from dotenv import load_dotenv
-load_dotenv()
 
+from routers import completeness
 from core.schema_guard import ensure_all_tables_once
 from routers import assessments
 from routers import (
@@ -70,7 +69,7 @@ app.include_router(dashboard.router)
 app.include_router(student_feedback.router)
 app.include_router(student_router.router)
 app.include_router(grading_audit_router.router)
-
+app.include_router(completeness.router)
 # ✅ IMPORTANT: DO NOT prefix these with "/api"
 app.include_router(assessments.router)
 

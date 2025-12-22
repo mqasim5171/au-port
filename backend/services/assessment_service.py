@@ -2,7 +2,7 @@ import json
 from pathlib import Path
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Tuple, Optional
-
+from models.course_clo import CourseCLO
 from sqlalchemy.orm import Session
 
 from models.course import Course
@@ -187,22 +187,42 @@ def ai_generate_expected_answers(db: Session, assessment: Assessment) -> Assessm
 
 
 def ai_clo_alignment(db: Session, assessment: Assessment) -> AssessmentCLOAlignment:
-    # Need course CLO list
-    course = db.get(Course, assessment.course_id)
-    raw_clos = (getattr(course, "clos", None) or "") if course else ""
+    """Align assessment questions against course CLOs.
+
+    ✅ Preferred source: latest `course_clos` upload record (CourseCLO.clos_text)
+    ✅ Fallback source: `Course.clos` JSON string (legacy)
+    """
+
     clos_list: List[str] = []
+
+    # 1) Preferred: latest CourseCLO record (newline-separated)
     try:
-        if raw_clos:
-            clos_list = json.loads(raw_clos)
-            if isinstance(clos_list, dict):
-                clos_list = list(clos_list.values())
-            if not isinstance(clos_list, list):
-                clos_list = []
+        rec = (
+            db.query(CourseCLO)
+            .filter(CourseCLO.course_id == str(assessment.course_id))
+            .order_by(CourseCLO.upload_date.desc())
+            .first()
+        )
+        if rec and (rec.clos_text or "").strip():
+            clos_list = [ln.strip() for ln in (rec.clos_text or "").splitlines() if ln.strip()]
     except Exception:
         clos_list = []
 
+    # 2) Fallback: legacy Course.clos JSON
     if not clos_list:
-        # no CLOs stored -> store empty alignment for transparency
+        course = db.get(Course, assessment.course_id)
+        raw_clos = (getattr(course, "clos", None) or "") if course else ""
+        try:
+            if raw_clos:
+                parsed = json.loads(raw_clos)
+                if isinstance(parsed, dict):
+                    parsed = list(parsed.values())
+                if isinstance(parsed, list):
+                    clos_list = [str(x).strip() for x in parsed if str(x).strip()]
+        except Exception:
+            clos_list = []
+
+    if not clos_list:
         align = (
             db.query(AssessmentCLOAlignment)
             .filter(AssessmentCLOAlignment.assessment_id == assessment.id)
@@ -221,7 +241,6 @@ def ai_clo_alignment(db: Session, assessment: Assessment) -> AssessmentCLOAlignm
         db.refresh(align)
         return align
 
-    # Extract questions
     qpack = ai_extract_questions(db, assessment)
     questions_json = qpack["questions_json"]
 
