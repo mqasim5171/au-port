@@ -10,6 +10,7 @@ import {
   DocumentTextIcon,
   ArrowRightOnRectangleIcon,
   ChartBarIcon,
+  BellIcon,
   Cog6ToothIcon, // Admin
   AcademicCapIcon, // Course Guide
   ArrowUpTrayIcon, // Weekly Upload
@@ -77,6 +78,9 @@ const Layout = ({ user: userProp, onLogout }) => {
 
       ...(isAdmin ? [{ name: "Admin", href: "/admin", icon: Cog6ToothIcon }] : []),
 
+     
+
+
       ...(isCourseLead
         ? [{ name: "Course Guide", href: "/course-guide", icon: AcademicCapIcon }]
         : []),
@@ -93,8 +97,10 @@ const Layout = ({ user: userProp, onLogout }) => {
       { name: "CLO Alignment", href: "/clo-alignment", icon: DocumentCheckIcon },
       { name: "Students Feedback", href: "/student-feedback", icon: ChatBubbleLeftRightIcon },
       { name: "Suggestions", href: "/suggestions", icon: LightBulbIcon },
-      { name: "Reports", href: "/reports", icon: DocumentTextIcon },
+      { name: "Reports", href: "/reports", icon: DocumentTextIcon }, 
+     
       { name: "Execution Monitor", href: "/execution", icon: ChartBarIcon },
+ ...(isAdmin ? [{ name: "Reminders", href: "/reminders", icon: BellIcon }] : []),
     ];
   }, [isAdmin, isCourseLead, isInstructor, canAssess]);
 

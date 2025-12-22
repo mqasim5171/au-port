@@ -1,13 +1,8 @@
-<<<<<<< HEAD
+# backend/routers/suggestions.py
+
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session, selectinload
 
-=======
-# backend/routers/suggestions.py
-from routers.auth import get_current_user
-from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy.orm import Session
->>>>>>> 746b0dc610d6afbe54e26a68d265006dbf95a76d
 from core.db import get_db
 from routers.auth import get_current_user
 
@@ -21,24 +16,27 @@ from schemas.suggestion import (
     ActionOut,
 )
 
-# ✅ remove prefix="/api"
-router = APIRouter(tags=["Suggestions"])
-
+router = APIRouter(prefix="/api", tags=["Suggestions"])
 
 
 @router.get("/courses/{course_id}/suggestions", response_model=list[SuggestionOut])
 def list_suggestions(
     course_id: str,
-    status: str | None = Query(None),
-    priority: str | None = Query(None),
+    status: str | None = Query(default=None),
+    priority: str | None = Query(default=None),
+    source: str | None = Query(default=None),
     db: Session = Depends(get_db),
     user=Depends(get_current_user),
 ):
     q = db.query(Suggestion).filter(Suggestion.course_id == course_id)
+
     if status:
         q = q.filter(Suggestion.status == status)
     if priority:
         q = q.filter(Suggestion.priority == priority)
+    if source:
+        q = q.filter(Suggestion.source == source)
+
     return q.order_by(Suggestion.created_at.desc()).all()
 
 
@@ -49,17 +47,35 @@ def create_suggestion(
     db: Session = Depends(get_db),
     user=Depends(get_current_user),
 ):
+    # Optional: restrict manual creation to QEC/Admin/HOD if your user has role
+    # role = getattr(user, "role", "").lower()
+    # if role not in {"qec", "admin", "hod"}:
+    #     raise HTTPException(status_code=403, detail="Forbidden")
+
     s = Suggestion(
         course_id=course_id,
         owner_id=payload.owner_id,
         source=payload.source,
         text=payload.text,
-        priority=payload.priority,
+        created_at=None,  # model default will handle if defined
         status="new",
+        priority=payload.priority,
     )
     db.add(s)
     db.commit()
     db.refresh(s)
+
+    # Log action
+    db.add(
+        SuggestionAction(
+            suggestion_id=s.id,
+            user_id=getattr(user, "id", None),
+            action_type="comment",
+            notes="Suggestion created",
+        )
+    )
+    db.commit()
+
     return s
 
 
@@ -91,26 +107,34 @@ def update_suggestion(
     if not s:
         raise HTTPException(status_code=404, detail="Suggestion not found")
 
-    changed = False
+    notes_parts: list[str] = []
+    action_type = "status_change"
+
     if payload.status is not None:
         s.status = payload.status
-        changed = True
+        notes_parts.append(f"status -> {payload.status}")
+
     if payload.priority is not None:
         s.priority = payload.priority
-        changed = True
-    if payload.text is not None and payload.text.strip():
-        s.text = payload.text
-        changed = True
+        action_type = "status_change"
+        notes_parts.append(f"priority -> {payload.priority}")
 
-    if changed:
-        db.add(
-            SuggestionAction(
-                suggestion_id=s.id,
-                user_id=user.id,
-                action_type="status_change",
-                notes="Suggestion updated",
-            )
+    if payload.text is not None and payload.text.strip():
+        s.text = payload.text.strip()
+        action_type = "comment"
+        notes_parts.append("text updated")
+
+    if not notes_parts:
+        return s  # nothing to update
+
+    db.add(
+        SuggestionAction(
+            suggestion_id=s.id,
+            user_id=getattr(user, "id", None),
+            action_type=action_type,
+            notes="; ".join(notes_parts),
         )
+    )
 
     db.commit()
     db.refresh(s)
@@ -130,10 +154,11 @@ def add_action(
 
     a = SuggestionAction(
         suggestion_id=suggestion_id,
-        user_id=user.id,
+        user_id=getattr(user, "id", None),
         action_type=payload.action_type,
         notes=payload.notes or "",
-        evidence_url=payload.evidence_url,
+        # evidence_url is optional; only set if your model/schema includes it
+        evidence_url=getattr(payload, "evidence_url", None),
     )
     db.add(a)
     db.commit()

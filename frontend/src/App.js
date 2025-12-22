@@ -17,6 +17,9 @@ import WeeklyUpload from "./pages/WeeklyUpload";
 import Assessments from "./pages/Assessments";
 import AssessmentDetail from "./pages/AssessmentsDetail"; // ✅ FIXED IMPORT
 
+import Reminders from "./pages/Reminders";
+
+
 import api from "./api";
 
 function App() {
@@ -86,13 +89,14 @@ function App() {
               <Route path="/reports" element={<Reports />} />
               <Route path="/execution" element={<CourseExecutionMonitor />} />
 
+              <Route path="/reminders" element={<Reminders />} />
               <Route path="/" element={<Navigate to="/dashboard" replace />} />
             </Route>
 
             <Route path="*" element={<Navigate to="/dashboard" replace />} />
           </>
         )}
-      </Routes>
+      </Routes>  
     </Router>
   );
 }

@@ -1,30 +1,5 @@
 # backend/models/assessment.py
 import uuid
-<<<<<<< HEAD
-from datetime import datetime, date, timezone
-
-from sqlalchemy import (
-    String,
-    Integer,
-    Date,
-    DateTime,
-    ForeignKey,
-    Table,
-    Column,
-)
-from sqlalchemy.dialects.postgresql import UUID
-from sqlalchemy.orm import Mapped, mapped_column, relationship
-
-from core.base import Base
-
-# Association table: Assessment <-> CourseCLO
-assessment_clos = Table(
-    "assessment_clos",
-    Base.metadata,
-    Column("assessment_id", UUID(as_uuid=True), ForeignKey("assessments.id", ondelete="CASCADE"), primary_key=True),
-    Column("clo_id", UUID(as_uuid=True), ForeignKey("course_clos.id", ondelete="CASCADE"), primary_key=True),
-)
-=======
 from datetime import datetime, timezone
 
 from sqlalchemy import Column, String, Integer, Date, DateTime, ForeignKey, Boolean, Text
@@ -38,30 +13,11 @@ from .associations import assessment_clos
 def utcnow():
     return datetime.now(timezone.utc)
 
->>>>>>> 746b0dc610d6afbe54e26a68d265006dbf95a76d
 
 
 class Assessment(Base):  # ✅ missing colon fixed
     __tablename__ = "assessments"
 
-<<<<<<< HEAD
-    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-
-    course_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True),
-        ForeignKey("courses.id", ondelete="CASCADE"),
-        index=True,
-        nullable=False,
-    )
-
-    type: Mapped[str] = mapped_column(String(20), nullable=False)  # quiz/assignment/midterm/final
-    title: Mapped[str] = mapped_column(String(255), nullable=False)
-    total_marks: Mapped[int] = mapped_column(Integer, nullable=False)
-    weightage: Mapped[int] = mapped_column(Integer, nullable=False)
-    date_conducted: Mapped[date] = mapped_column(Date, nullable=False)
-
-    # Many-to-many with CourseCLO
-=======
     # ✅ DB: uuid
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
 
@@ -119,7 +75,6 @@ class Assessment(Base):  # ✅ missing colon fixed
 
     # ✅ many-to-many Assessment <-> CourseCLO via assessment_clos
     # DB: assessment_clos(assessment_id uuid, clo_id uuid)
->>>>>>> 746b0dc610d6afbe54e26a68d265006dbf95a76d
     clos = relationship(
         "CourseCLO",
         secondary=assessment_clos,
