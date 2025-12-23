@@ -94,7 +94,7 @@ const Layout = ({ user: userProp, onLogout }) => {
       { name: "Explainability", href: "/explainability", icon: DocumentTextIcon },
       { name: "Students Feedback", href: "/student-feedback", icon: ChatBubbleLeftRightIcon },
       { name: "Suggestions", href: "/suggestions", icon: LightBulbIcon },
-      { name: "Reports", href: "/reports", icon: DocumentTextIcon },
+      
       { name: "Execution Monitor", href: "/execution", icon: ChartBarIcon },
     ];
   }, [isAdmin, isCourseLead, isInstructor, canAssess]);
