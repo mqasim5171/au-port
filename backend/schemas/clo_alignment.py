@@ -1,33 +1,40 @@
-# schemas/clo_alignment.py
+# backend/schemas/clo_alignment.py
+
 from typing import List, Dict, Optional
-from pydantic import BaseModel, Field
-
-class CLOPair(BaseModel):
-    clo: str
-    assessment: str   # renamed for clarity
-    similarity: float
-
-
-
+from pydantic import BaseModel
 
 
 class AssessmentItem(BaseModel):
     name: str
 
+
+class CLOPair(BaseModel):
+    clo: str
+    assessment: Optional[str]
+    similarity: float
+
+
 class CLOAlignmentRequest(BaseModel):
     clos: List[str]
     assessments: List[AssessmentItem]
+    threshold: Optional[float] = 0.65
+
 
 class CLOAlignmentResponse(BaseModel):
     avg_top: float
-    flags: List[str] = Field(default_factory=list)
-    pairs: List[CLOPair]
+    flags: List[str]
+
+    # core results
     clos: List[str]
-    assessments: List[AssessmentItem]
-    # mapping clo -> {best_assessment: str, similarity: float}
-    alignment: Dict[str, Dict[str, str | float]]
+    assessments: List[str]
+    alignment: Dict[str, Dict[str, float | bool]]
+    pairs: List[CLOPair]
+
+    # 🔍 explainability
+    audit: Optional[Dict] = None
+
 
 class CLOAlignmentAutoResponse(BaseModel):
     clos: List[str]
     assessments: List[str]
-    alignment: Dict[str, Dict[str, float]]
+    alignment: Dict[str, Dict[str, float]] = {}

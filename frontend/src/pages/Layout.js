@@ -91,6 +91,7 @@ const Layout = ({ user: userProp, onLogout }) => {
 
       { name: "Course Folder", href: "/course-folder", icon: FolderIcon },
       { name: "CLO Alignment", href: "/clo-alignment", icon: DocumentCheckIcon },
+      { name: "Explainability", href: "/explainability", icon: DocumentTextIcon },
       { name: "Students Feedback", href: "/student-feedback", icon: ChatBubbleLeftRightIcon },
       { name: "Suggestions", href: "/suggestions", icon: LightBulbIcon },
       { name: "Reports", href: "/reports", icon: DocumentTextIcon },

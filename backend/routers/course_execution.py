@@ -1,14 +1,18 @@
-# backend/routers/course_execution.py
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
+from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 from typing import List
-
+from pathlib import Path
+import mimetypes
+from collections import Counter
 from services.weekly_zip_upload_service import handle_weekly_zip_upload
+from services.completeness_service import run_completeness
 
 from core.db import SessionLocal
 from .auth import get_current_user
 from models.course import Course
 from models.course_execution import WeeklyPlan, WeeklyExecution, DeviationLog
+from models.uploads import Upload, UploadFileItem
 from schemas.course_execution import (
     WeeklyPlanOut,
     WeeklyPlanUpdate,
@@ -250,7 +254,7 @@ async def upload_weekly_zip(
 
     user_id = current["id"] if isinstance(current, dict) else str(current.id)
 
-    return handle_weekly_zip_upload(
+    out = handle_weekly_zip_upload(
         db=db,
         course_id=course_id,
         week_no=week_no,
@@ -258,3 +262,231 @@ async def upload_weekly_zip(
         zip_file_bytes=data,
         zip_filename=file.filename or f"week_{week_no}.zip",
     )
+
+    # ✅ AUTO-RUN completeness for weekly uploads
+    try:
+        comp = run_completeness(
+            db=db,
+            course_id=out.get("course_id") or course_id,
+            upload_id=out.get("upload_id"),
+            week_no=week_no,
+        )
+    except Exception as e:
+        comp = {"error": str(e)}
+
+    out["completeness"] = comp
+    return out
+
+
+# -------------------- NEW: Explorer APIs --------------------
+
+@router.get("/{course_id}/weeks/{week_no}/uploads")
+def list_weekly_uploads(
+    course_id: str,
+    week_no: int,
+    db: Session = Depends(get_db),
+    current=Depends(get_current_user),
+):
+    # weekly uploads are Upload rows with week_no + file_type_guess=weekly_zip
+    q = (
+        db.query(Upload)
+        .filter(Upload.course_id == course_id, Upload.week_no == week_no)
+        .order_by(Upload.created_at.desc())
+    )
+    rows = q.all()
+    return [
+        {
+            "id": str(u.id),
+            "filename_original": u.filename_original,
+            "created_at": u.created_at.isoformat() if u.created_at else None,
+            "bytes": int(u.bytes or 0),
+            "file_type_guess": u.file_type_guess,
+        }
+        for u in rows
+    ]
+
+
+@router.get("/{course_id}/weeks/{week_no}/latest")
+def weekly_latest_bundle(
+    course_id: str,
+    week_no: int,
+    db: Session = Depends(get_db),
+    current=Depends(get_current_user),
+):
+    # latest upload
+    up = (
+        db.query(Upload)
+        .filter(Upload.course_id == course_id, Upload.week_no == week_no)
+        .order_by(Upload.created_at.desc())
+        .first()
+    )
+
+    exe = (
+        db.query(WeeklyExecution)
+        .filter(WeeklyExecution.course_id == course_id, WeeklyExecution.week_number == week_no)
+        .first()
+    )
+
+    if not up and not exe:
+        return {"upload": None, "execution": None, "completeness": None}
+
+    comp = None
+    if up:
+        try:
+            comp = run_completeness(db=db, course_id=course_id, upload_id=str(up.id), week_no=week_no)
+        except Exception as e:
+            comp = {"error": str(e)}
+
+    return {
+        "upload": {
+            "id": str(up.id),
+            "filename_original": up.filename_original,
+            "created_at": up.created_at.isoformat() if up.created_at else None,
+            "bytes": int(up.bytes or 0),
+        } if up else None,
+        "execution": {
+            "coverage_percent": float(exe.coverage_percent or 0),
+            "coverage_status": exe.coverage_status,
+            "missing_topics": exe.missing_topics,
+            "matched_topics": exe.matched_topics,
+            "last_updated_at": exe.last_updated_at.isoformat() if exe.last_updated_at else None,
+        } if exe else None,
+        "completeness": comp,
+    }
+
+
+@router.get("/uploads/{upload_id}/files")
+def list_upload_files(
+    upload_id: str,
+    db: Session = Depends(get_db),
+    current=Depends(get_current_user),
+):
+    up = db.get(Upload, upload_id)
+    if not up:
+        raise HTTPException(status_code=404, detail="Upload not found")
+
+    files = (
+        db.query(UploadFileItem)
+        .filter(UploadFileItem.upload_id == up.id)
+        .order_by(UploadFileItem.filename.asc())
+        .all()
+    )
+
+    return [
+        {
+            "filename": f.filename,
+            "ext": f.ext,
+            "bytes": int(f.bytes or 0),
+            "text_chars": int(f.text_chars or 0),
+            "download_url": f"/courses/uploads/{upload_id}/files/{f.filename}",
+        }
+        for f in files
+    ]
+
+
+@router.get("/uploads/{upload_id}/files/{filename}")
+def download_upload_file(
+    upload_id: str,
+    filename: str,
+    db: Session = Depends(get_db),
+    current=Depends(get_current_user),
+):
+    """
+    Streams a file out of the extracted folder.
+    We do NOT store extracted paths in DB, so we locate via Upload.parse_log safely.
+    """
+    up = db.get(Upload, upload_id)
+    if not up:
+        raise HTTPException(status_code=404, detail="Upload not found")
+
+    manifest = up.parse_log or []
+    filename = Path(filename).name  # sanitize
+
+    candidate = None
+    for m in manifest:
+        p = m.get("path")
+        if not p:
+            continue
+        if Path(p).name == filename:
+            candidate = p
+            break
+
+    if not candidate:
+        raise HTTPException(status_code=404, detail="File not found in this upload")
+
+    fpath = Path(candidate)
+    if not fpath.exists():
+        raise HTTPException(status_code=404, detail="File is missing on server storage")
+
+    ctype, _ = mimetypes.guess_type(str(fpath))
+    return FileResponse(
+        path=str(fpath),
+        media_type=ctype or "application/octet-stream",
+        filename=filename,
+    )
+
+
+
+@router.get("/{course_id}/weekly-progress")
+def weekly_progress(
+    course_id: str,
+    db: Session = Depends(get_db),
+    current=Depends(get_current_user),
+):
+    weeks = []
+    weeks_behind = []
+    missing_counter = Counter()
+
+    for w in range(1, 17):
+        # latest upload for this week
+        up = (
+            db.query(Upload)
+            .filter(Upload.course_id == course_id, Upload.week_no == w)
+            .order_by(Upload.created_at.desc())
+            .first()
+        )
+
+        exe = (
+            db.query(WeeklyExecution)
+            .filter(WeeklyExecution.course_id == course_id, WeeklyExecution.week_number == w)
+            .first()
+        )
+
+        coverage_percent = float(exe.coverage_percent or 0) if exe else 0.0
+        coverage_status = exe.coverage_status if exe else ("skipped" if not up else "behind")
+
+        completeness_percent = None
+        if up:
+            try:
+                comp = run_completeness(db=db, course_id=course_id, upload_id=str(up.id), week_no=w)
+                completeness_percent = float(comp.get("score_percent")) if isinstance(comp, dict) and comp.get("score_percent") is not None else None
+            except Exception:
+                completeness_percent = None
+
+        if coverage_status == "behind":
+            weeks_behind.append(w)
+
+        # aggregate missing topics
+        if exe and exe.missing_topics:
+            for line in (exe.missing_topics or "").split("\n"):
+                t = line.strip().lower()
+                if t:
+                    missing_counter[t] += 1
+
+        weeks.append({
+            "week_no": w,
+            "has_upload": bool(up),
+            "upload_id": str(up.id) if up else None,
+            "coverage_percent": round(coverage_percent, 2),
+            "coverage_status": coverage_status,
+            "completeness_percent": round(completeness_percent, 2) if completeness_percent is not None else None,
+        })
+
+    top_missing = [{"topic": k, "count": v} for k, v in missing_counter.most_common(20)]
+
+    return {
+        "course_id": course_id,
+        "weeks": weeks,
+        "weeks_behind": weeks_behind,
+        "top_missing_topics": top_missing,
+    }

@@ -1,22 +1,35 @@
 import json
 import re
 import zipfile
+import os
 from pathlib import Path
 from datetime import datetime, timezone
-from typing import Optional, List
+from typing import Optional, List, Dict, Any
 
 from sqlalchemy.orm import Session
 from sqlalchemy import or_
 
 from models.course import Course
-from models.uploads import Upload, UploadText
+from models.uploads import Upload, UploadText, UploadFileItem
 from models.course_execution import WeeklyPlan, WeeklyExecution, DeviationLog
+from models.completeness import CompletenessRun
+from models.grading_audit import GradingAudit
+
 from services.upload_adapter import parse_document
 from services.execution_compare import compare_week
 
+# OPTIONAL (safe imports)
+try:
+    from services.clo_alignment_service import run_clo_alignment
+    from schemas.clo_alignment import CLOAlignmentRequest
+except Exception:
+    run_clo_alignment = None
+    CLOAlignmentRequest = None
+
+
 ALLOWED_EXTS = {".pdf", ".docx", ".pptx", ".txt", ".md"}
 MAX_FILES = 200
-MAX_TEXT_CHARS = 80_000  # keep enough signal
+MAX_TEXT_CHARS = 80_000
 
 PLACEHOLDER_HINTS = {
     "update later",
@@ -24,14 +37,16 @@ PLACEHOLDER_HINTS = {
     "week topics",
 }
 
+
+# ----------------------- helpers -----------------------
+
 def clean_text(val: Optional[str]) -> str:
     if val is None:
         return ""
     if not isinstance(val, str):
         val = str(val)
 
-    val = val.replace("\x00", "")  # remove NULs
-
+    val = val.replace("\x00", "")
     out = []
     for ch in val:
         o = ord(ch)
@@ -41,23 +56,21 @@ def clean_text(val: Optional[str]) -> str:
             out.append(ch)
     return "".join(out).strip()
 
+
 def _strip_placeholders(text: str) -> str:
     t = clean_text(text).lower()
     for h in PLACEHOLDER_HINTS:
         t = t.replace(h, " ")
-    t = re.sub(r"\s+", " ", t).strip()
-    return t
+    return re.sub(r"\s+", " ", t).strip()
+
 
 def _safe_extract_zip(zip_path: str, dest_dir: str) -> list[str]:
     dest = Path(dest_dir)
     dest.mkdir(parents=True, exist_ok=True)
 
-    extracted_files: list[str] = []
+    extracted: list[str] = []
     with zipfile.ZipFile(zip_path, "r") as z:
-        names = z.namelist()
-        if len(names) > MAX_FILES:
-            names = names[:MAX_FILES]
-
+        names = z.namelist()[:MAX_FILES]
         for member in names:
             if member.endswith("/"):
                 continue
@@ -70,42 +83,46 @@ def _safe_extract_zip(zip_path: str, dest_dir: str) -> list[str]:
             with z.open(member) as src, open(target, "wb") as out:
                 out.write(src.read())
 
-            extracted_files.append(str(target))
+            extracted.append(str(target))
+    return extracted
 
-    return extracted_files
 
 def _extract_week_section(text: str, week_no: int) -> str:
-    """
-    Extracts lines like:
-      1 Chapter 1: ...
-      • ...
-    until next week line.
-    """
     t = clean_text(text)
     if not t:
         return ""
 
     if week_no < 16:
-        pattern = rf"(?ms)^\s*{week_no}\s+(.*?)(?=^\s*{week_no+1}\s+)"
+        pat = rf"(?ms)^\s*{week_no}\s+(.*?)(?=^\s*{week_no+1}\s+)"
     else:
-        pattern = rf"(?ms)^\s*{week_no}\s+(.*)$"
+        pat = rf"(?ms)^\s*{week_no}\s+(.*)$"
 
-    m = re.search(pattern, t)
+    m = re.search(pat, t)
     return m.group(1).strip() if m else ""
 
-def _compact_text_for_matching(text: str, max_chars: int = MAX_TEXT_CHARS) -> str:
+
+def _compact_text_for_matching(text: str) -> str:
     text = clean_text(text)
-    if len(text) <= max_chars:
+    if len(text) <= MAX_TEXT_CHARS:
         return text
-    half = max_chars // 2
-    return (text[:half] + "\n\n---SNIP---\n\n" + text[-half:]).strip()
+    h = MAX_TEXT_CHARS // 2
+    return (text[:h] + "\n\n---SNIP---\n\n" + text[-h:]).strip()
+
 
 def _resolve_course(db: Session, course_id_or_code: str) -> Course | None:
     return (
         db.query(Course)
-        .filter(or_(Course.id == course_id_or_code, Course.course_code == course_id_or_code))
+        .filter(
+            or_(
+                Course.id == course_id_or_code,
+                Course.course_code == course_id_or_code,
+            )
+        )
         .first()
     )
+
+
+# ----------------------- MAIN SERVICE -----------------------
 
 def handle_weekly_zip_upload(
     db: Session,
@@ -115,18 +132,20 @@ def handle_weekly_zip_upload(
     zip_file_bytes: bytes,
     zip_filename: str,
     storage_root: str = "uploads/weekly",
-):
+) -> Dict[str, Any]:
+
     now = datetime.now(timezone.utc)
 
-    # ✅ accept UUID or course_code
+    # ---------- resolve course ----------
     course = _resolve_course(db, course_id)
     if not course:
-        raise ValueError(f"Course not found for '{course_id}'. Use UUID or valid course_code.")
+        raise ValueError(f"Course not found: {course_id}")
 
     real_course_id = str(course.id)
 
-    upload_id = str(int(now.timestamp() * 1000))
-    base_dir = Path(storage_root) / real_course_id / f"week_{week_no}" / upload_id
+    # ---------- store zip ----------
+    upload_ts = str(int(now.timestamp() * 1000))
+    base_dir = Path(storage_root) / real_course_id / f"week_{week_no}" / upload_ts
     base_dir.mkdir(parents=True, exist_ok=True)
 
     zip_path = base_dir / (zip_filename or f"week_{week_no}.zip")
@@ -135,8 +154,9 @@ def handle_weekly_zip_upload(
     extracted_dir = base_dir / "extracted"
     files = _safe_extract_zip(str(zip_path), str(extracted_dir))
 
+    # ---------- parse files ----------
     texts: List[str] = []
-    manifest = []
+    manifest: List[Dict[str, Any]] = []
 
     for fp in files:
         ext = Path(fp).suffix.lower()
@@ -145,77 +165,94 @@ def handle_weekly_zip_upload(
 
         try:
             parsed = parse_document(fp) or {}
-            raw_text = parsed.get("text") or ""
-            t = clean_text(raw_text)
+            raw = parsed.get("text") or ""
+            txt = clean_text(raw)
             err = parsed.get("error")
         except Exception as e:
-            t = ""
-            err = f"parse failed: {e}"
+            txt = ""
+            err = str(e)
 
-        if t:
-            texts.append(t)
+        if txt:
+            texts.append(txt)
 
-        manifest.append({"path": fp, "ext": ext, "chars": len(t), "error": err})
+        manifest.append({
+            "path": fp,
+            "ext": ext,
+            "chars": len(txt),
+            "error": err,
+        })
 
-    delivered_full = "\n\n".join(texts)
-    delivered_text = _compact_text_for_matching(delivered_full)
+    delivered_text = _compact_text_for_matching("\n\n".join(texts))
 
     if not delivered_text.strip():
-        raise ValueError(
-            "No text extracted from ZIP. Your PDFs might be scanned images (need OCR) or parser failed. "
-            f"Errors: {[m for m in manifest if m.get('error')][:5]}"
-        )
+        raise ValueError("No text extracted from weekly ZIP")
 
-    # ✅ Fetch weekly plan
+    # ---------- fetch plan ----------
     plan = (
         db.query(WeeklyPlan)
-        .filter(WeeklyPlan.course_id == real_course_id, WeeklyPlan.week_number == week_no)
+        .filter(
+            WeeklyPlan.course_id == real_course_id,
+            WeeklyPlan.week_number == week_no,
+        )
         .first()
     )
 
     plan_source = "weekly_plans.planned_topics"
     plan_text_raw = clean_text(plan.planned_topics if plan else "")
 
-    # ✅ IMPORTANT: extract the week section so we don’t compare the whole guide header
     week_section = _extract_week_section(plan_text_raw, week_no)
     if week_section:
         plan_text = week_section
-        plan_source = "weekly_plans.planned_topics (week section extracted)"
+        plan_source += " (week section)"
     else:
         plan_text = _strip_placeholders(plan_text_raw)
 
-    # fallback: try course.course_guide_text
     if not plan_text.strip():
-        guide_text = clean_text(getattr(course, "course_guide_text", "") or "")
-        week_section2 = _extract_week_section(guide_text, week_no)
-        if week_section2:
-            plan_text = week_section2
-            plan_source = "courses.course_guide_text (week section extracted)"
+        guide = clean_text(getattr(course, "course_guide_text", "") or "")
+        week_section = _extract_week_section(guide, week_no)
+        if week_section:
+            plan_text = week_section
+            plan_source = "courses.course_guide_text (week section)"
         else:
-            plan_text = _strip_placeholders(guide_text)
+            plan_text = _strip_placeholders(guide)
             plan_source = "courses.course_guide_text"
 
     if not plan_text.strip():
-        raise ValueError(
-            f"No weekly plan text found for course={course.course_code} ({real_course_id}), week={week_no}. "
-            "Generate weekly plan first or store course_guide_text."
-        )
+        raise ValueError("No weekly plan text available")
 
+    # ---------- COVERAGE ----------
     coverage_score, missing_terms, plan_terms = compare_week(plan_text, delivered_text)
-    coverage_score = float(coverage_score)
-    coverage_percent = coverage_score * 100.0
 
-    missing_terms = missing_terms or []
-    plan_terms = plan_terms or []
+    coverage_percent = float(coverage_score) * 100.0
+    coverage_status = "on_track" if coverage_percent >= 80.0 else "behind"
     matched_terms = [t for t in plan_terms if t not in set(missing_terms)]
 
-    coverage_status = "on_track" if coverage_percent >= 80.0 else "behind"
+    audit_snapshot = {
+        "timestamp": now.isoformat(),
+        "week_no": week_no,
+        "coverage_score": coverage_score,
+        "coverage_percent": coverage_percent,
+        "plan_source": plan_source,
+    }
 
-    # ✅ Save Upload (matches your model exactly)
+    # ---------- CLO ALIGNMENT (OPTIONAL) ----------
+    clo_alignment_result = None
+    if run_clo_alignment and hasattr(course, "clos") and course.clos:
+        try:
+            payload = CLOAlignmentRequest(
+                clos=course.clos,
+                assessments=plan_terms,
+                threshold=0.65,
+            )
+            clo_alignment_result = run_clo_alignment(payload)
+        except Exception:
+            clo_alignment_result = None
+
+    # ---------- save Upload ----------
     up = Upload(
         course_id=real_course_id,
-        filename_original=zip_filename or f"week_{week_no}.zip",
-        filename_stored=str(zip_path.name),
+        filename_original=zip_filename,
+        filename_stored=zip_path.name,
         ext="zip",
         file_type_guess="weekly_zip",
         week_no=week_no,
@@ -226,19 +263,58 @@ def handle_weekly_zip_upload(
     db.add(up)
     db.flush()
 
-    txt = UploadText(
-        upload_id=up.id,
-        text=delivered_text,
-        text_chars=len(delivered_text),
-        needs_ocr=False,
-        parse_warnings=manifest,
-    )
-    db.add(txt)
+    # ---------- per-file metadata ----------
+    for m in manifest:
+        try:
+            p = m.get("path")
+            if not p:
+                continue
+            fpath = Path(p)
+            db.add(
+                UploadFileItem(
+                    upload_id=up.id,
+                    filename=fpath.name,
+                    ext=fpath.suffix.lstrip("."),
+                    bytes=fpath.stat().st_size if fpath.exists() else 0,
+                    pages=None,
+                    text_chars=int(m.get("chars") or 0),
+                )
+            )
+        except Exception:
+            pass
 
-    # Upsert WeeklyExecution
+    db.add(
+        UploadText(
+            upload_id=up.id,
+            text=delivered_text,
+            text_chars=len(delivered_text),
+            needs_ocr=False,
+            parse_warnings=manifest,
+        )
+    )
+
+    # ---------- completeness run (history) ----------
+    try:
+        from services.completeness_service import run_completeness
+        comp = run_completeness(db=db, course_id=real_course_id, upload_id=up.id, week_no=week_no)
+        db.add(
+            CompletenessRun(
+                course_id=real_course_id,
+                upload_id=up.id,
+                week_no=week_no,
+                result_json=comp,
+            )
+        )
+    except Exception:
+        comp = None
+
+    # ---------- upsert WeeklyExecution ----------
     ex = (
         db.query(WeeklyExecution)
-        .filter(WeeklyExecution.course_id == real_course_id, WeeklyExecution.week_number == week_no)
+        .filter(
+            WeeklyExecution.course_id == real_course_id,
+            WeeklyExecution.week_number == week_no,
+        )
         .first()
     )
     if not ex:
@@ -252,18 +328,41 @@ def handle_weekly_zip_upload(
     ex.matched_topics = clean_text("\n".join(matched_terms))[:20000]
     ex.last_updated_at = now
 
-    if coverage_percent < 80.0:
-        dev = DeviationLog(
-            course_id=real_course_id,
-            week_number=week_no,
-            type="coverage_low",
-            details=clean_text(json.dumps({
-                "coverage_percent": coverage_percent,
-                "missing_terms": missing_terms[:200],
-                "note": "Weekly upload coverage below threshold.",
-            }, ensure_ascii=False)),
+    if hasattr(ex, "audit_json"):
+        ex.audit_json = audit_snapshot
+
+    if hasattr(ex, "audit_history"):
+        hist = ex.audit_history or []
+        hist.append(audit_snapshot)
+        ex.audit_history = hist
+
+    if clo_alignment_result and hasattr(ex, "clo_audit_json"):
+        ex.clo_audit_json = clo_alignment_result.model_dump()
+
+    if coverage_status == "behind":
+        db.add(
+            DeviationLog(
+                course_id=real_course_id,
+                week_number=week_no,
+                type="coverage_low",
+                details=json.dumps(audit_snapshot),
+            )
         )
-        db.add(dev)
+
+    # ---------- grading fairness hook ----------
+    try:
+        if hasattr(course, "assessments"):
+            for a in course.assessments or []:
+                db.add(
+                    GradingAudit(
+                        assessment_id=a.id,
+                        metric="weekly_context",
+                        value=f"Week {week_no} coverage={coverage_percent:.2f}",
+                        notes="Recorded during weekly ZIP upload",
+                    )
+                )
+    except Exception:
+        pass
 
     db.commit()
     db.refresh(ex)
@@ -277,10 +376,12 @@ def handle_weekly_zip_upload(
         "coverage_status": coverage_status,
         "missing_terms": missing_terms[:200],
         "matched_terms": matched_terms[:200],
+        "audit": audit_snapshot,
+        "clo_alignment": clo_alignment_result.model_dump() if clo_alignment_result else None,
+        "completeness": comp,
         "upload_id": str(up.id),
         "files_seen": len(files),
         "files_used": len([m for m in manifest if m["ext"] in ALLOWED_EXTS]),
-        # debug (so you can SEE why it’s low)
         "plan_source": plan_source,
         "plan_text_len": len(plan_text),
         "delivered_text_len": len(delivered_text),

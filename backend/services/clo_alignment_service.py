@@ -1,0 +1,171 @@
+# backend/services/clo_alignment_service.py
+
+import math
+import re
+from typing import List, Dict, Any
+
+from services.openrouter_embeddings import embed_texts
+
+
+# ------------------------- helpers -------------------------
+
+STOPWORDS = {
+    "the","a","an","and","or","to","of","in","on","for","with","at","by","from","as",
+    "is","are","was","were","be","been","it","this","that","these","those","we","you",
+    "your","our","they","their","i","he","she","them","not","can","will","may","also",
+    "course","assessment","quiz","assignment","exam","project","evaluation"
+}
+
+def _norm(text: str) -> str:
+    text = (text or "").lower()
+    text = text.replace("&", " and ")
+    text = re.sub(r"[-/]", " ", text)
+    text = re.sub(r"\s+", " ", text)
+    return text.strip()
+
+def _tokens(text: str) -> List[str]:
+    words = re.findall(r"[a-z0-9]{2,}", _norm(text))
+    out = []
+    for w in words:
+        if w in STOPWORDS:
+            continue
+        if w.isdigit():
+            continue
+        out.append(w)
+    return out
+
+def _cos(a: List[float], b: List[float]) -> float:
+    dot = 0.0
+    na = 0.0
+    nb = 0.0
+    for x, y in zip(a, b):
+        dot += x * y
+        na += x * x
+        nb += y * y
+    if na <= 0 or nb <= 0:
+        return 0.0
+    return dot / (math.sqrt(na) * math.sqrt(nb))
+
+
+def _clean_items(items: List[str]) -> List[str]:
+    out = []
+    seen = set()
+    for x in items:
+        t = x.strip()
+        k = _norm(t)
+        if not t or k in seen:
+            continue
+        seen.add(k)
+        out.append(t)
+    return out
+
+
+# ------------------------- CORE ENGINE -------------------------
+
+def run_clo_alignment(
+    clos: List[str],
+    assessments: List[Dict[str, str]],
+    threshold: float = 0.65,
+) -> Dict[str, Any]:
+    """
+    Explainable CLO ↔ Assessment alignment using embeddings.
+
+    Returns:
+      avg_top: float
+      flags: list[str]
+      pairs: list[dict]
+      alignment: dict
+      audit: dict (FULL explainability)
+    """
+
+    clos = _clean_items(clos)
+    assessment_names = _clean_items([a["name"] for a in assessments])
+
+    if not clos or not assessment_names:
+        return {
+            "avg_top": 0.0,
+            "flags": ["no_clos_or_assessments"],
+            "pairs": [],
+            "alignment": {},
+            "clos": clos,
+            "assessments": assessment_names,
+            "audit": {"reason": "empty_input"},
+        }
+
+    # ---------------- embeddings ----------------
+    clo_emb = embed_texts(clos)
+    ass_emb = embed_texts(assessment_names)
+
+    clo_vecs = clo_emb["vectors"]
+    ass_vecs = ass_emb["vectors"]
+
+    pairs = []
+    alignment = {}
+    top_scores = []
+
+    for i, clo in enumerate(clos):
+        best_score = -1.0
+        best_j = -1
+
+        for j, ass in enumerate(assessment_names):
+            s = _cos(clo_vecs[i], ass_vecs[j])
+            if s > best_score:
+                best_score = s
+                best_j = j
+
+        best_ass = assessment_names[best_j] if best_j >= 0 else None
+
+        pairs.append({
+            "clo": clo,
+            "assessment": best_ass,
+            "similarity": round(float(best_score), 4),
+        })
+
+        alignment[clo] = {
+            "best_assessment": best_ass,
+            "similarity": round(float(best_score), 4),
+            "pass": bool(best_score >= threshold),
+        }
+
+        top_scores.append(round(float(best_score), 4))
+
+    # ---------------- metrics ----------------
+    avg_top = sum(top_scores) / max(1, len(top_scores))
+
+    flags = []
+    if avg_top < threshold:
+        flags.append("low_overall_alignment")
+
+    weak = [p for p in pairs if p["similarity"] < threshold]
+    if weak:
+        flags.append("weak_clo_mappings")
+
+    # ---------------- explainability ----------------
+    audit = {
+        "threshold": threshold,
+        "avg_top_similarity": round(float(avg_top), 4),
+        "total_clos": len(clos),
+        "total_assessments": len(assessment_names),
+        "weak_mappings": [
+            {
+                "clo": p["clo"],
+                "assessment": p["assessment"],
+                "similarity": p["similarity"],
+            }
+            for p in weak
+        ],
+        "embedding_meta": {
+            "clo": clo_emb.get("meta"),
+            "assessments": ass_emb.get("meta"),
+        },
+    }
+
+    return {
+        "avg_top": round(float(avg_top), 4),
+        "flags": flags,
+        "pairs": pairs,
+        "alignment": alignment,
+        "clos": clos,
+        "assessments": assessment_names,
+        "audit": audit,
+    }

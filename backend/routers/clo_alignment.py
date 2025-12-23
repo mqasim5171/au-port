@@ -1,25 +1,40 @@
-# routers/clo_alignment.py
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
 from sqlalchemy.orm import Session
 from core.db import SessionLocal
+
+from datetime import datetime, timezone
+import tempfile, zipfile, os, shutil
+from pathlib import Path
+from typing import List, Dict, Any, Optional
+
 from models.uploads import UploadText, Upload
 from models.course_clo import CourseCLO
+
 from services.clo_extractor import extract_clos_and_assessments
 from services.clo_parser import extract_clos_from_text
 from services.text_processing import extract_text_from_path_or_bytes, parse_bytes
-from services.alignment import align_clos_to_assessments
+from services.upload_adapter import parse_document
+
+# 🔥 Explainable CLO alignment engine
+from services.clo_alignment_service import run_clo_alignment
+
+# ✅ Auth
+from routers.auth import get_current_user
+
 from schemas.clo_alignment import (
     CLOAlignmentResponse,
     CLOAlignmentRequest,
     CLOAlignmentAutoResponse,
     AssessmentItem,
 )
-import tempfile, zipfile, os, shutil
 
 router = APIRouter(prefix="/align", tags=["CLO Alignment"])
 
 
-# Dependency for DB session
+# ======================================================
+# DB
+# ======================================================
+
 def get_db():
     db = SessionLocal()
     try:
@@ -28,11 +43,84 @@ def get_db():
         db.close()
 
 
-# -------------------- AUTO ALIGN --------------------
+# ======================================================
+# Helpers
+# ======================================================
+
+def utcnow():
+    return datetime.now(timezone.utc)
+
+
+def _clean_lines(text: str) -> List[str]:
+    return [x.strip() for x in (text or "").splitlines() if x.strip()]
+
+
+def _safe_json(obj: Any) -> Any:
+    try:
+        import json
+        json.dumps(obj)
+        return obj
+    except Exception:
+        return str(obj)
+
+
+def _create_upload_row(
+    db: Session,
+    course_id: str,
+    filename_original: str,
+    filename_stored: str,
+    ext: str,
+    file_type_guess: str,
+    bytes_len: int,
+    parse_log: Optional[list],
+) -> Upload:
+    """
+    Safe Upload creator (supports your mixed Upload model variants).
+    """
+    now = utcnow()
+    u = Upload(course_id=course_id)
+
+    if hasattr(u, "filename_original"):
+        u.filename_original = filename_original
+    if hasattr(u, "filename_stored"):
+        u.filename_stored = filename_stored
+    if hasattr(u, "ext"):
+        u.ext = ext
+    if hasattr(u, "file_type_guess"):
+        u.file_type_guess = file_type_guess
+    if hasattr(u, "bytes"):
+        u.bytes = int(bytes_len or 0)
+    if hasattr(u, "parse_log"):
+        u.parse_log = parse_log or []
+    if hasattr(u, "created_at"):
+        try:
+            u.created_at = now.replace(tzinfo=None)
+        except Exception:
+            u.created_at = now
+
+    # legacy fallback
+    if hasattr(u, "filename") and not getattr(u, "filename", None):
+        u.filename = filename_original
+
+    db.add(u)
+    db.flush()
+    return u
+
+
+# ======================================================
+# AUTO ALIGN (Preview)
+# ======================================================
+
 @router.get("/{course_id}/auto", response_model=CLOAlignmentAutoResponse)
-def auto_align_course(course_id: str, db: Session = Depends(get_db)):
-    """Automatically align the latest CLOs with the latest uploaded course material."""
-    # Step 1: Get latest CLOs
+def auto_align_course(
+    course_id: str,
+    db: Session = Depends(get_db),
+    current=Depends(get_current_user),
+):
+    """
+    Returns CLOs + detected assessments (no alignment yet).
+    """
+
     latest_clo = (
         db.query(CourseCLO)
         .filter(CourseCLO.course_id == course_id)
@@ -40,15 +128,12 @@ def auto_align_course(course_id: str, db: Session = Depends(get_db)):
         .first()
     )
     if not latest_clo or not latest_clo.clos_text:
-        raise HTTPException(
-            status_code=404, detail="No CLOs found for this course. Please upload a CLO file."
-        )
+        raise HTTPException(404, "No CLOs found for this course")
 
-    clos = [line.strip() for line in latest_clo.clos_text.splitlines() if line.strip()]
+    clos = _clean_lines(latest_clo.clos_text)
     if not clos:
-        raise HTTPException(status_code=400, detail="No valid CLOs found in CLO upload.")
+        raise HTTPException(400, "Empty CLO list")
 
-    # Step 2: Get latest upload text
     latest_upload = (
         db.query(Upload)
         .filter(Upload.course_id == course_id)
@@ -56,93 +141,139 @@ def auto_align_course(course_id: str, db: Session = Depends(get_db)):
         .first()
     )
     if not latest_upload:
-        raise HTTPException(status_code=404, detail="No course material uploads found.")
+        raise HTTPException(404, "No course material uploads found")
 
-    text_obj = db.query(UploadText).filter(UploadText.upload_id == latest_upload.id).first()
+    text_obj = (
+        db.query(UploadText)
+        .filter(UploadText.upload_id == latest_upload.id)
+        .first()
+    )
     if not text_obj or not text_obj.text:
-        raise HTTPException(status_code=404, detail="No extracted text found from course upload.")
+        raise HTTPException(404, "No extracted text found")
 
-    # Step 3: Extract assessments
     _, assessments = extract_clos_and_assessments(text_obj.text)
     if not assessments:
-        raise HTTPException(status_code=400, detail="No assessments found in course upload.")
+        raise HTTPException(400, "No assessments detected")
+
+    # audit preview
+    if hasattr(latest_clo, "audit_json"):
+        latest_clo.audit_json = {
+            "type": "auto_align_preview",
+            "assessments_count": len(assessments),
+            "ts": utcnow().isoformat(),
+        }
+        db.add(latest_clo)
+        db.commit()
 
     return CLOAlignmentAutoResponse(
         clos=clos,
         assessments=assessments,
-        alignment={},  # alignment can be populated in manual step
+        alignment={},
     )
 
 
-# -------------------- MANUAL ALIGN --------------------
-@router.post("/clo/{course_id}", response_model=CLOAlignmentResponse)
-def manual_align_course(course_id: str, payload: CLOAlignmentRequest, db: Session = Depends(get_db)):
-    """Manually align CLOs with provided assessments (frontend controlled)."""
-    if not payload.clos or not payload.assessments:
-        raise HTTPException(status_code=400, detail="CLOs and assessments are required")
+# ======================================================
+# MANUAL ALIGN (Explainable)
+# ======================================================
 
-    # Convert payload assessments into dicts for service
+@router.post("/clo/{course_id}", response_model=CLOAlignmentResponse)
+def manual_align_course(
+    course_id: str,
+    payload: CLOAlignmentRequest,
+    db: Session = Depends(get_db),
+    current=Depends(get_current_user),
+):
+    """
+    Explainable CLO ↔ Assessment alignment.
+    """
+
+    if not payload.clos or not payload.assessments:
+        raise HTTPException(400, "CLOs and assessments are required")
+
     assessments = [{"name": a.name} for a in payload.assessments]
 
-    result = align_clos_to_assessments(payload.clos, assessments)
-
-    return CLOAlignmentResponse(
-        avg_top=result["avg_top"],
-        flags=result["flags"],
-        clos=result["clos"],
-        assessments=[AssessmentItem(name=a["name"]) for a in result["assessments"]],
-        alignment=result["alignment"],
-        pairs=result["pairs"],  # Pydantic will coerce dicts → CLOPair objects
+    result = run_clo_alignment(
+        clos=payload.clos,
+        assessments=assessments,
+        threshold=payload.threshold or 0.65,
     )
 
+    latest_clo = (
+        db.query(CourseCLO)
+        .filter(CourseCLO.course_id == course_id)
+        .order_by(CourseCLO.upload_date.desc())
+        .first()
+    )
+    if latest_clo:
+        if hasattr(latest_clo, "alignment_json"):
+            latest_clo.alignment_json = _safe_json(result)
+        if hasattr(latest_clo, "audit_json"):
+            latest_clo.audit_json = {
+                "type": "manual_alignment",
+                "avg_top": result["avg_top"],
+                "flags": result["flags"],
+                "threshold": payload.threshold or 0.65,
+                "user": getattr(current, "id", None),
+                "ts": utcnow().isoformat(),
+            }
+        db.add(latest_clo)
+        db.commit()
 
-# -------------------- ZIP UPLOAD ALIGN --------------------
+    return CLOAlignmentResponse(**result)
+
+
+# ======================================================
+# ZIP ALIGN (CLO + Materials)
+# ======================================================
+
 @router.post("/zip/{course_id}", response_model=CLOAlignmentResponse)
 async def align_from_zip(
     course_id: str,
     clos_file: UploadFile = File(...),
     materials_zip: UploadFile = File(...),
     db: Session = Depends(get_db),
+    current=Depends(get_current_user),
 ):
     """
-    Upload both a CLO file (.docx/.pdf) and a ZIP of course materials.
-    - Extracts CLOs and assessments
-    - Saves CLOs into CourseCLO table
-    - Saves materials into Upload + UploadText tables
-    - Runs semantic alignment
+    CLO file + materials ZIP → explainable semantic alignment.
     """
 
-    # Step 1: Parse CLO file
     clo_bytes = await clos_file.read()
+    if not clo_bytes:
+        raise HTTPException(400, "Empty CLO file")
+
     clo_text = extract_text_from_path_or_bytes(clo_bytes, clos_file.filename)
-
-    clos = extract_clos_from_text(clo_text) if clo_text else []
+    clos = extract_clos_from_text(clo_text) or []
     if not clos:
-        clos_fallback, _ = extract_clos_and_assessments(clo_text or "")
-        clos = clos_fallback
+        clos, _ = extract_clos_and_assessments(clo_text or "")
+    clos = _clean_lines("\n".join(clos))
     if not clos:
-        raise HTTPException(status_code=400, detail="No CLOs found in provided CLO file")
+        raise HTTPException(400, "No CLOs extracted")
 
-    # Save CLOs to DB
     clo_entry = CourseCLO(course_id=course_id, clos_text="\n".join(clos))
+    if hasattr(clo_entry, "audit_json"):
+        clo_entry.audit_json = {
+            "type": "zip_upload",
+            "uploaded_by": getattr(current, "id", None),
+            "filename": clos_file.filename,
+            "ts": utcnow().isoformat(),
+        }
     db.add(clo_entry)
     db.commit()
 
-    # Step 2: Extract ZIP contents
     tmp_dir = tempfile.mkdtemp()
+    aggregated_text = ""
+    parse_manifest: List[Dict[str, Any]] = []
+
     try:
         zip_bytes = await materials_zip.read()
         zip_path = os.path.join(tmp_dir, "upload.zip")
-        with open(zip_path, "wb") as fh:
-            fh.write(zip_bytes)
+        with open(zip_path, "wb") as f:
+            f.write(zip_bytes)
 
-        try:
-            with zipfile.ZipFile(zip_path, "r") as zf:
-                zf.extractall(tmp_dir)
-        except zipfile.BadZipFile:
-            raise HTTPException(status_code=400, detail="Uploaded materials file is not a valid ZIP archive")
+        with zipfile.ZipFile(zip_path, "r") as z:
+            z.extractall(tmp_dir)
 
-        aggregated_text = ""
         for root, _, files in os.walk(tmp_dir):
             for fname in files:
                 fpath = os.path.join(root, fname)
@@ -151,50 +282,65 @@ async def align_from_zip(
 
                 parsed = {}
                 try:
-                    # Try adapter-based parsing first
-                    from services import adapter
-                    parsed = adapter.parse_document(fpath)
-                except Exception:
+                    parsed = parse_document(fpath) or {}
+                except Exception as e:
+                    parsed = {"text": "", "error": str(e)}
+
+                if not (parsed.get("text") or "").strip():
                     try:
                         with open(fpath, "rb") as fh:
-                            parsed = parse_bytes(fh.read(), fname)
+                            parsed2 = parse_bytes(fh.read(), fname) or {}
+                        if parsed2.get("text"):
+                            parsed = parsed2
                     except Exception:
-                        parsed = {}
+                        pass
 
                 text = (parsed.get("text") or "").strip()
                 if text:
                     aggregated_text += text + "\n\n"
 
+                parse_manifest.append({
+                    "path": fpath,
+                    "ext": Path(fpath).suffix.lower(),
+                    "chars": len(text),
+                    "error": parsed.get("error"),
+                })
+
         if not aggregated_text.strip():
-            raise HTTPException(status_code=400, detail="No text extracted from uploaded ZIP contents")
+            raise HTTPException(400, "No text extracted from ZIP")
 
-        # Save Upload + UploadText to DB
-        upload_entry = Upload(course_id=course_id, filename=materials_zip.filename)
-        db.add(upload_entry)
+        upload_entry = _create_upload_row(
+            db=db,
+            course_id=course_id,
+            filename_original=materials_zip.filename or "materials.zip",
+            filename_stored="upload.zip",
+            ext="zip",
+            file_type_guess="clo_materials_zip",
+            bytes_len=len(zip_bytes),
+            parse_log=parse_manifest,
+        )
         db.commit()
 
-        text_entry = UploadText(upload_id=upload_entry.id, text=aggregated_text)
-        db.add(text_entry)
+        db.add(UploadText(upload_id=upload_entry.id, text=aggregated_text))
         db.commit()
 
-        # Step 3: Extract assessments
         _, assessments = extract_clos_and_assessments(aggregated_text)
         if not assessments:
-            raise HTTPException(status_code=400, detail="No assessments were detected in the uploaded materials")
+            raise HTTPException(400, "No assessments found in materials")
 
-        assessment_items = [{"name": a} for a in assessments]
-
-        # Step 4: Run alignment
-        result = align_clos_to_assessments(clos, assessment_items)
-
-        return CLOAlignmentResponse(
-            avg_top=result["avg_top"],
-            flags=result["flags"],
-            clos=result["clos"],
-            assessments=[AssessmentItem(name=a["name"]) for a in result["assessments"]],
-            alignment=result["alignment"],
-            pairs=result["pairs"],
+        result = run_clo_alignment(
+            clos=clos,
+            assessments=[{"name": a} for a in assessments],
         )
+
+        if hasattr(clo_entry, "alignment_json"):
+            clo_entry.alignment_json = _safe_json(result)
+        if hasattr(clo_entry, "materials_upload_id"):
+            clo_entry.materials_upload_id = str(upload_entry.id)
+        db.add(clo_entry)
+        db.commit()
+
+        return CLOAlignmentResponse(**result)
 
     finally:
         try:

@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
 import api from "../api";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useLocation } from "react-router-dom";
 
 function Chip({ children, tone = "gray" }) {
   const bg =
@@ -67,6 +67,12 @@ export default function Assessments() {
   const [date, setDate] = useState(todayStr);
 
   const nav = useNavigate();
+  const location = useLocation();
+
+  const queryCourseId = useMemo(() => {
+    const sp = new URLSearchParams(location.search);
+    return sp.get("courseId") || "";
+  }, [location.search]);
 
   useEffect(() => {
     (async () => {
@@ -74,12 +80,18 @@ export default function Assessments() {
         const res = await api.get("/courses");
         const list = res.data || [];
         setCourses(list);
-        if (list.length) setCourseId(list[0].id);
+
+        // ✅ if coming from CourseFolder => /assessments?courseId=...
+        const preferred = queryCourseId && list.some(c => c.id === queryCourseId)
+          ? queryCourseId
+          : (list[0]?.id || "");
+
+        setCourseId(preferred);
       } catch (e) {
         setErr(e?.response?.data?.detail || "Failed to load courses");
       }
     })();
-  }, []);
+  }, [queryCourseId]);
 
   useEffect(() => {
     if (!courseId) return;

@@ -13,6 +13,11 @@ import CourseExecutionMonitor from "./pages/CourseExecutionMonitor";
 import Admin from "./pages/Admin";
 import CourseGuideUpload from "./pages/CourseGuideUpload";
 import WeeklyUpload from "./pages/WeeklyUpload";
+import GradingFairness from "./pages/GradingFairness";
+import CLOHeatmap from "./pages/CLOHeatmap";
+import AuditLogs from "./pages/AuditLogs";
+import Explainability from "./pages/Explainability";
+
 
 import Assessments from "./pages/Assessments";
 import AssessmentDetail from "./pages/AssessmentsDetail"; // ✅ FIXED IMPORT
@@ -72,6 +77,10 @@ function App() {
               <Route path="/dashboard" element={<Dashboard />} />
               <Route path="/course-folder" element={<CourseFolder />} />
               <Route path="/weekly-upload" element={<WeeklyUpload />} />
+              <Route path="/fairness" element={<GradingFairness user={user} />} />
+              <Route path="/heatmap" element={<CLOHeatmap />} />
+              <Route path="/audit-logs" element={<AuditLogs user={user} />} />
+              <Route path="/explainability" element={<Explainability user={user} />} />
 
               {/* ✅ Assessments (List + Detail) */}
               <Route path="/assessments" element={<Assessments />} />
