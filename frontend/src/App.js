@@ -4,7 +4,7 @@ import { BrowserRouter as Router, Routes, Route, Navigate } from "react-router-d
 import Login from "./pages/Login";
 import Layout from "./pages/Layout";
 import Dashboard from "./pages/Dashboard";
-import CourseFolder from "./pages/CourseFolder";
+
 import CLOAlignment from "./pages/CLOAlignment";
 import StudentFeedback from "./pages/StudentFeedback";
 import Suggestions from "./pages/Suggestions";
@@ -75,7 +75,7 @@ function App() {
           <>
             <Route element={<Layout user={user} onLogout={handleLogout} />}>
               <Route path="/dashboard" element={<Dashboard />} />
-              <Route path="/course-folder" element={<CourseFolder />} />
+              
               <Route path="/weekly-upload" element={<WeeklyUpload />} />
               <Route path="/fairness" element={<GradingFairness user={user} />} />
               <Route path="/heatmap" element={<CLOHeatmap />} />

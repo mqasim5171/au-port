@@ -1,40 +1,40 @@
 # backend/schemas/clo_alignment.py
 
-from typing import List, Dict, Optional
 from pydantic import BaseModel
+from typing import Dict, Any, List
 
 
 class AssessmentItem(BaseModel):
     name: str
 
 
-class CLOPair(BaseModel):
-    clo: str
-    assessment: Optional[str]
-    similarity: float
+class BestAssessment(BaseModel):
+    question: str
+    score: float
+    passed: bool
+
+
+class CLOAlignmentItem(BaseModel):
+    best_assessment: BestAssessment
+    score: float
+    passed: bool
+
+
+class CLOAlignmentResponse(BaseModel):
+    alignment: Dict[str, CLOAlignmentItem]
+    avg_top: float
+    flags: List[str]
+    pairs: List[Dict[str, Any]] | None = None
+    audit: Dict[str, Any] | None = None
 
 
 class CLOAlignmentRequest(BaseModel):
     clos: List[str]
     assessments: List[AssessmentItem]
-    threshold: Optional[float] = 0.65
-
-
-class CLOAlignmentResponse(BaseModel):
-    avg_top: float
-    flags: List[str]
-
-    # core results
-    clos: List[str]
-    assessments: List[str]
-    alignment: Dict[str, Dict[str, float | bool]]
-    pairs: List[CLOPair]
-
-    # 🔍 explainability
-    audit: Optional[Dict] = None
+    threshold: float | None = 0.65
 
 
 class CLOAlignmentAutoResponse(BaseModel):
     clos: List[str]
     assessments: List[str]
-    alignment: Dict[str, Dict[str, float]] = {}
+    alignment: Dict[str, Any]

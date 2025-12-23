@@ -21,10 +21,8 @@ from services.execution_compare import compare_week
 # OPTIONAL (safe imports)
 try:
     from services.clo_alignment_service import run_clo_alignment
-    from schemas.clo_alignment import CLOAlignmentRequest
 except Exception:
     run_clo_alignment = None
-    CLOAlignmentRequest = None
 
 
 ALLOWED_EXTS = {".pdf", ".docx", ".pptx", ".txt", ".md"}
@@ -120,6 +118,32 @@ def _resolve_course(db: Session, course_id_or_code: str) -> Course | None:
         )
         .first()
     )
+
+
+def _course_clos_json_to_list(raw: str) -> list[str]:
+    """
+    Admin stores courses.clos as JSON string:
+      [{"code":"CLO1","description":"..."}, ...]
+    Convert to list[str] used by run_clo_alignment:
+      ["CLO1: ...", ...]
+    """
+    if not raw:
+        return []
+    try:
+        data = json.loads(raw)
+    except Exception:
+        return []
+    out: list[str] = []
+    if isinstance(data, list):
+        for item in data:
+            if isinstance(item, dict):
+                code = (item.get("code") or "").strip()
+                desc = (item.get("description") or "").strip()
+                if code and desc:
+                    out.append(f"{code}: {desc}")
+            elif isinstance(item, str) and item.strip():
+                out.append(item.strip())
+    return out
 
 
 # ----------------------- MAIN SERVICE -----------------------
@@ -237,14 +261,17 @@ def handle_weekly_zip_upload(
 
     # ---------- CLO ALIGNMENT (OPTIONAL) ----------
     clo_alignment_result = None
-    if run_clo_alignment and hasattr(course, "clos") and course.clos:
+    if run_clo_alignment and getattr(course, "clos", None):
         try:
-            payload = CLOAlignmentRequest(
-                clos=course.clos,
-                assessments=plan_terms,
-                threshold=0.65,
-            )
-            clo_alignment_result = run_clo_alignment(payload)
+            clos_list = _course_clos_json_to_list(course.clos or "")
+            if clos_list:
+                # run_clo_alignment expects assessments = list[{"name": "..."}]
+                assessments_for_alignment = [{"name": t} for t in plan_terms[:50]]
+                clo_alignment_result = run_clo_alignment(
+                    clos=clos_list,
+                    assessments=assessments_for_alignment,
+                    threshold=0.65,
+                )
         except Exception:
             clo_alignment_result = None
 
@@ -336,8 +363,9 @@ def handle_weekly_zip_upload(
         hist.append(audit_snapshot)
         ex.audit_history = hist
 
+    # ✅ store dict directly (not model_dump)
     if clo_alignment_result and hasattr(ex, "clo_audit_json"):
-        ex.clo_audit_json = clo_alignment_result.model_dump()
+        ex.clo_audit_json = clo_alignment_result
 
     if coverage_status == "behind":
         db.add(
@@ -377,7 +405,7 @@ def handle_weekly_zip_upload(
         "missing_terms": missing_terms[:200],
         "matched_terms": matched_terms[:200],
         "audit": audit_snapshot,
-        "clo_alignment": clo_alignment_result.model_dump() if clo_alignment_result else None,
+        "clo_alignment": clo_alignment_result if clo_alignment_result else None,
         "completeness": comp,
         "upload_id": str(up.id),
         "files_seen": len(files),

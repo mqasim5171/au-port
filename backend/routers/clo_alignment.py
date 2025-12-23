@@ -6,26 +6,28 @@ from datetime import datetime, timezone
 import tempfile, zipfile, os, shutil
 from pathlib import Path
 from typing import List, Dict, Any, Optional
+import json
 
 from models.uploads import UploadText, Upload
 from models.course_clo import CourseCLO
+from models.course import Course
+
+# ✅ NEW: read quiz PDFs from assessment module
+from models.assessment import Assessment, AssessmentFile
 
 from services.clo_extractor import extract_clos_and_assessments
 from services.clo_parser import extract_clos_from_text
 from services.text_processing import extract_text_from_path_or_bytes, parse_bytes
 from services.upload_adapter import parse_document
 
-# 🔥 Explainable CLO alignment engine
 from services.clo_alignment_service import run_clo_alignment
 
-# ✅ Auth
 from routers.auth import get_current_user
 
 from schemas.clo_alignment import (
     CLOAlignmentResponse,
     CLOAlignmentRequest,
     CLOAlignmentAutoResponse,
-    AssessmentItem,
 )
 
 router = APIRouter(prefix="/align", tags=["CLO Alignment"])
@@ -57,11 +59,40 @@ def _clean_lines(text: str) -> List[str]:
 
 def _safe_json(obj: Any) -> Any:
     try:
-        import json
         json.dumps(obj)
         return obj
     except Exception:
         return str(obj)
+
+
+def _clos_from_course_json(course: Optional[Course]) -> List[str]:
+    """
+    Admin panel stores course.clos as JSON string:
+      [{"code":"CLO1","description":"..."}, ...]
+    Convert into list[str] used by alignment:
+      ["CLO1: ...", "CLO2: ..."]
+    """
+    if not course or not getattr(course, "clos", None):
+        return []
+
+    raw = course.clos or ""
+    try:
+        data = json.loads(raw)
+    except Exception:
+        return []
+
+    out: List[str] = []
+    if isinstance(data, list):
+        for item in data:
+            if isinstance(item, dict):
+                code = (item.get("code") or "").strip()
+                desc = (item.get("description") or "").strip()
+                if code and desc:
+                    out.append(f"{code}: {desc}")
+            elif isinstance(item, str) and item.strip():
+                out.append(item.strip())
+
+    return out
 
 
 def _create_upload_row(
@@ -107,6 +138,58 @@ def _create_upload_row(
     return u
 
 
+def _get_latest_assessment_text(db: Session, course_id: str) -> Optional[str]:
+    """
+    ✅ IMPORTANT:
+    This is the main fix.
+    CLO Alignment should use Assessment PDF text (questions) if available.
+    """
+    a = (
+        db.query(Assessment)
+        .filter(Assessment.course_id == course_id)
+        .order_by(Assessment.created_at.desc())
+        .first()
+    )
+    if not a:
+        return None
+
+    af = (
+        db.query(AssessmentFile)
+        .filter(AssessmentFile.assessment_id == a.id)
+        .order_by(AssessmentFile.created_at.desc())
+        .first()
+    )
+    if not af:
+        return None
+
+    text = (af.extracted_text or "").strip()
+    return text or None
+
+
+def _get_latest_course_upload_text(db: Session, course_id: str) -> Optional[str]:
+    """
+    Fallback: use latest UploadText (weekly/material uploads) if assessment text not found.
+    """
+    latest_upload = (
+        db.query(Upload)
+        .filter(Upload.course_id == course_id)
+        .order_by(Upload.created_at.desc())
+        .first()
+    )
+    if not latest_upload:
+        return None
+
+    text_obj = (
+        db.query(UploadText)
+        .filter(UploadText.upload_id == latest_upload.id)
+        .first()
+    )
+    if not text_obj:
+        return None
+
+    return (text_obj.text or "").strip() or None
+
+
 # ======================================================
 # AUTO ALIGN (Preview)
 # ======================================================
@@ -119,47 +202,65 @@ def auto_align_course(
 ):
     """
     Returns CLOs + detected assessments (no alignment yet).
+
+    ✅ FIXED DATA SOURCE:
+    1) Prefer Assessment module PDF text (AssessmentFile.extracted_text)
+    2) Fallback to latest UploadText (course uploads)
     """
 
+    # 1) First preference: uploaded CLO doc record
     latest_clo = (
         db.query(CourseCLO)
         .filter(CourseCLO.course_id == course_id)
         .order_by(CourseCLO.upload_date.desc())
         .first()
     )
-    if not latest_clo or not latest_clo.clos_text:
-        raise HTTPException(404, "No CLOs found for this course")
 
-    clos = _clean_lines(latest_clo.clos_text)
+    clos: List[str] = []
+    if latest_clo and getattr(latest_clo, "clos_text", None):
+        clos = _clean_lines(latest_clo.clos_text)
+
+    # 2) Fallback: Admin panel course.clos JSON
     if not clos:
-        raise HTTPException(400, "Empty CLO list")
+        course = db.query(Course).filter(Course.id == course_id).first()
+        clos = _clos_from_course_json(course)
 
-    latest_upload = (
-        db.query(Upload)
-        .filter(Upload.course_id == course_id)
-        .order_by(Upload.created_at.desc())
-        .first()
-    )
-    if not latest_upload:
-        raise HTTPException(404, "No course material uploads found")
+    if not clos:
+        raise HTTPException(
+            404,
+            "No CLOs found for this course (set CLOs in Admin OR upload CLO document)."
+        )
 
-    text_obj = (
-        db.query(UploadText)
-        .filter(UploadText.upload_id == latest_upload.id)
-        .first()
-    )
-    if not text_obj or not text_obj.text:
-        raise HTTPException(404, "No extracted text found")
+    # ✅ NEW: get assessment questions text
+    text = _get_latest_assessment_text(db, course_id)
 
-    _, assessments = extract_clos_and_assessments(text_obj.text)
+    # fallback: use latest UploadText if assessment text missing
+    source = "assessment_pdf"
+    if not text:
+        text = _get_latest_course_upload_text(db, course_id)
+        source = "latest_upload_text"
+
+    if not text:
+        raise HTTPException(
+            404,
+            "No text found. Upload an assessment PDF (preferred) or upload weekly/material files."
+        )
+
+    # detect assessments/questions
+    _, assessments = extract_clos_and_assessments(text)
     if not assessments:
-        raise HTTPException(400, "No assessments detected")
+        raise HTTPException(
+            400,
+            f"No assessments detected from {source}. "
+            "Make sure your PDF includes question patterns like 'Q1:' / 'Question 1:' / 'Quiz' / 'Marks'."
+        )
 
-    # audit preview
-    if hasattr(latest_clo, "audit_json"):
+    # audit preview only if we had a CourseCLO record
+    if latest_clo and hasattr(latest_clo, "audit_json"):
         latest_clo.audit_json = {
             "type": "auto_align_preview",
             "assessments_count": len(assessments),
+            "source": source,
             "ts": utcnow().isoformat(),
         }
         db.add(latest_clo)
@@ -210,8 +311,8 @@ def manual_align_course(
         if hasattr(latest_clo, "audit_json"):
             latest_clo.audit_json = {
                 "type": "manual_alignment",
-                "avg_top": result["avg_top"],
-                "flags": result["flags"],
+                "avg_top": result.get("avg_top"),
+                "flags": result.get("flags"),
                 "threshold": payload.threshold or 0.65,
                 "user": getattr(current, "id", None),
                 "ts": utcnow().isoformat(),

@@ -17,3 +17,4 @@ class StudentFeedback(Base):
     emotion = Column(String(50))
     topic = Column(Integer)
     batch = Column(Integer, index=True)
+    department = Column(String(20), index=True)

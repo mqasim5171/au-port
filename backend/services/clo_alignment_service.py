@@ -1,5 +1,3 @@
-# backend/services/clo_alignment_service.py
-
 import math
 import re
 from typing import List, Dict, Any
@@ -23,21 +21,14 @@ def _norm(text: str) -> str:
     text = re.sub(r"\s+", " ", text)
     return text.strip()
 
-def _tokens(text: str) -> List[str]:
-    words = re.findall(r"[a-z0-9]{2,}", _norm(text))
-    out = []
-    for w in words:
-        if w in STOPWORDS:
-            continue
-        if w.isdigit():
-            continue
-        out.append(w)
-    return out
+def _tokens(text: str):
+    return [
+        w for w in re.findall(r"[a-z0-9]{2,}", _norm(text))
+        if w not in STOPWORDS and not w.isdigit()
+    ]
 
-def _cos(a: List[float], b: List[float]) -> float:
-    dot = 0.0
-    na = 0.0
-    nb = 0.0
+def _cos(a, b) -> float:
+    dot = na = nb = 0.0
     for x, y in zip(a, b):
         dot += x * y
         na += x * x
@@ -46,10 +37,8 @@ def _cos(a: List[float], b: List[float]) -> float:
         return 0.0
     return dot / (math.sqrt(na) * math.sqrt(nb))
 
-
 def _clean_items(items: List[str]) -> List[str]:
-    out = []
-    seen = set()
+    out, seen = [], set()
     for x in items:
         t = x.strip()
         k = _norm(t)
@@ -67,16 +56,6 @@ def run_clo_alignment(
     assessments: List[Dict[str, str]],
     threshold: float = 0.65,
 ) -> Dict[str, Any]:
-    """
-    Explainable CLO ↔ Assessment alignment using embeddings.
-
-    Returns:
-      avg_top: float
-      flags: list[str]
-      pairs: list[dict]
-      alignment: dict
-      audit: dict (FULL explainability)
-    """
 
     clos = _clean_items(clos)
     assessment_names = _clean_items([a["name"] for a in assessments])
@@ -92,7 +71,7 @@ def run_clo_alignment(
             "audit": {"reason": "empty_input"},
         }
 
-    # ---------------- embeddings ----------------
+    # -------- embeddings --------
     clo_emb = embed_texts(clos)
     ass_emb = embed_texts(assessment_names)
 
@@ -113,23 +92,30 @@ def run_clo_alignment(
                 best_score = s
                 best_j = j
 
-        best_ass = assessment_names[best_j] if best_j >= 0 else None
+        best_ass = assessment_names[best_j] if best_j >= 0 else ""
+
+        score = round(float(best_score), 4)
+        passed = bool(score >= threshold)
 
         pairs.append({
             "clo": clo,
             "assessment": best_ass,
-            "similarity": round(float(best_score), 4),
+            "similarity": score,
         })
 
+        # ✅ FIXED STRUCTURE (THIS IS THE KEY PART)
         alignment[clo] = {
-            "best_assessment": best_ass,
-            "similarity": round(float(best_score), 4),
-            "pass": bool(best_score >= threshold),
+            "best_assessment": {
+                "question": best_ass,
+                "score": score,
+                "passed": passed,
+            },
+            "score": score,
+            "passed": passed,
         }
 
-        top_scores.append(round(float(best_score), 4))
+        top_scores.append(score)
 
-    # ---------------- metrics ----------------
     avg_top = sum(top_scores) / max(1, len(top_scores))
 
     flags = []
@@ -140,20 +126,12 @@ def run_clo_alignment(
     if weak:
         flags.append("weak_clo_mappings")
 
-    # ---------------- explainability ----------------
     audit = {
         "threshold": threshold,
         "avg_top_similarity": round(float(avg_top), 4),
         "total_clos": len(clos),
         "total_assessments": len(assessment_names),
-        "weak_mappings": [
-            {
-                "clo": p["clo"],
-                "assessment": p["assessment"],
-                "similarity": p["similarity"],
-            }
-            for p in weak
-        ],
+        "weak_mappings": weak,
         "embedding_meta": {
             "clo": clo_emb.get("meta"),
             "assessments": ass_emb.get("meta"),

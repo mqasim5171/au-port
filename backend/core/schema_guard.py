@@ -7,6 +7,7 @@ from models import completeness  # noqa: F401
 # ✅ import models so metadata knows them
 from models import user, course, uploads, course_execution  # noqa: F401
 from models import assessment, student, student_submission  # noqa: F401
+from models import student_feedback  # noqa: F401  ✅ ADD THIS
 
 _initialized = False
 
